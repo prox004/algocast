@@ -11,6 +11,8 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: system-ui, -apple-system, sans-serif;
+  /* prevent pull-to-refresh interfering with swipe cards */
+  overscroll-behavior-y: contain;
 }
 
 @layer components {
@@ -21,7 +23,7 @@ body {
     @apply bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors;
   }
   .card {
-    @apply bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-lg;
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-4 sm:p-5 shadow-lg;
   }
   .input {
     @apply bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-brand-500 w-full;
@@ -34,5 +36,9 @@ body {
   }
   .badge-no {
     @apply inline-block bg-red-900/60 text-red-400 text-xs font-semibold px-2 py-0.5 rounded;
+  }
+  /* Safe area for bottom sheets on iOS */
+  .safe-bottom {
+    padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
   }
 }

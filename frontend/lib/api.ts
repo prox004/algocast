@@ -38,9 +38,28 @@ async function request<T>(
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...options, headers });
+  } catch {
+    throw new Error('Cannot connect to server — is the backend running?');
+  }
+
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`Server error: ${res.status} ${res.statusText}`);
+  }
+
+  if (!res.ok) {
+    // handles both { error: 'string' } and { error: { message: 'string' } }
+    const msg =
+      typeof data?.error === 'string'
+        ? data.error
+        : data?.error?.message ?? data?.message ?? 'Request failed';
+    throw new Error(msg);
+  }
   return data as T;
 }
 
