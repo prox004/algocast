@@ -6,6 +6,7 @@ import express from 'express';
 import cors from 'cors';
 import aiRoutes from './routes/ai';
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
+import { getAutoMarketGeneratorService } from './services/autoMarketGenerator.service';
 
 // JS routes (CommonJS)
 const authRoutes = require('./routes/auth');
@@ -17,7 +18,27 @@ const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+      'http://192.168.17.1:3000',
+      'http://192.168.17.1:3001',
+      process.env.FRONTEND_URL
+    ].filter(Boolean);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all for development
+    }
+  },
   credentials: true
 }));
 
@@ -49,11 +70,16 @@ app.use(notFoundHandler);
 // Error handler (must be last)
 app.use(errorHandler);
 
+// Start AI market auto-generation
+const autoGen = getAutoMarketGeneratorService();
+autoGen.start();
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 CastAlgo AI Backend running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🤖 AI endpoints: http://localhost:${PORT}/ai/*`);
+  console.log(`🎯 Auto Market Gen: Enabled (interval: ${process.env.AUTO_MARKET_GEN_INTERVAL_MIN || 5} min)`);
   
   // Log environment status
   console.log('\n📋 Environment Status:');

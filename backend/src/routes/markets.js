@@ -45,7 +45,7 @@ function enrichMarket(market) {
 // GET /markets
 router.get('/', (_req, res) => {
   const markets = db.getAllMarkets().map(enrichMarket);
-  return res.json(markets);
+  return res.json({ markets });
 });
 
 // GET /markets/:id

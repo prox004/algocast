@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen">
+      <body className="min-h-screen" suppressHydrationWarning>
         <NavBar />
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-8">{children}</main>
       </body>

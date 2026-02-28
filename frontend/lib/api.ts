@@ -169,7 +169,8 @@ export async function withdraw(to_address: string, amount: number): Promise<{ su
 // ── Markets ──────────────────────────────────────────────────────────────────
 
 export async function getMarkets(): Promise<Market[]> {
-  return request('/markets');
+  const data = await request<{ markets: Market[] }>('/markets');
+  return data.markets;
 }
 
 export async function getMarket(id: string): Promise<Market> {
