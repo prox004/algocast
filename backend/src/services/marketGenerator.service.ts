@@ -210,17 +210,10 @@ NOW GENERATE THE MARKET JSON:`;
   }
 
   private generateFallbackMarket(request: MarketRequest): GeneratedMarket {
-    const now = new Date();
-    const expiry = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    console.error('❌ AI market generation failed. No fallback - throwing error.');
+    console.error('   Trend:', request.trend);
+    console.error('   Please check your OPENAI_API_KEY or OPENROUTER_API_KEY');
     
-    return {
-      question: `Will ${request.trend.replace(/^#/, '')} continue trending for the next 24 hours?`,
-      data_source: "Twitter API trending data",
-      expiry: expiry.toISOString(),
-      ai_probability: 0.5,
-      confidence: "medium",
-      reasoning: "Fallback market generated due to API limitations. Based on trend persistence patterns.",
-      suggested_action: "HOLD"
-    };
+    throw new Error('AI market generation failed and fallback is disabled. Real AI required.');
   }
 }

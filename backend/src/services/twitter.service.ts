@@ -12,6 +12,9 @@ interface TrendData {
   volume: number;
   url: string;
   timestamp: number;
+  tweet_id?: string;
+  tweet_author?: string;
+  tweet_content?: string;
 }
 
 // Influential accounts to monitor for prediction market signals
@@ -200,9 +203,10 @@ export class TwitterService {
   async getTrends(woeid: number = 1): Promise<TrendData[]> {
     console.log('getTrends called - client exists:', !!this.client);
     try {
-      if (!this.client) {
-        console.log('No Twitter client, using mock data');
-        return this.getMockTrends();
+      if (!this.client && !this.rapidApiKey) {
+        console.error('❌ No Twitter API credentials configured. Cannot fetch real tweets.');
+        console.error('   Set TWITTER_BEARER_TOKEN or RAPIDAPI_KEY in .env');
+        return []; // Return empty array instead of mock data
       }
 
       console.log('Fetching tweets from influential accounts...');
@@ -236,9 +240,14 @@ export class TwitterService {
             trends.push({
               trend: `@${username}: ${((latestTweet as any).text || '').substring(0, 50)}...`,
               volume: engagement,
-              url: `https://twitter.com/${username}`,
+              url: `https://twitter.com/${username}/status/${(latestTweet as any).id}`,
               timestamp: cycleStart,
+              tweet_id: (latestTweet as any).id,
+              tweet_author: username,
+              tweet_content: (latestTweet as any).text || ''
             });
+            
+            console.log(`✅ [TwitterService] Found real tweet from @${username}: "${((latestTweet as any).text || '').substring(0, 50)}..."`);
           } else {
             console.log(`[TwitterService] No new tweets from @${username} since cursor`);
           }
@@ -249,18 +258,24 @@ export class TwitterService {
 
       // Sort by engagement
       const sortedTrends = trends.sort((a, b) => b.volume - a.volume);
-      console.log(`Fetched ${sortedTrends.length} new tweet-based trends this cycle`);
+      
+      if (sortedTrends.length > 0) {
+        console.log(`✅ Fetched ${sortedTrends.length} REAL tweet-based trends this cycle`);
+      } else {
+        console.warn('⚠️  No new tweets found in this cycle');
+      }
 
-      return sortedTrends.length > 0 ? sortedTrends : this.getMockTrends();
+      return sortedTrends; // Return real data only, empty if none found
     } catch (error) {
-      console.error('Error fetching Twitter trends:', error);
-      return this.getMockTrends();
+      console.error('❌ Error fetching Twitter trends:', error);
+      return []; // Return empty array on error, no mock data
     }
   }
 
   async searchRecentTweets(query: string, maxResults: number = 10) {
     try {
       if (!this.client) {
+        console.warn('⚠️  No Twitter client available for search');
         return [];
       }
       
@@ -274,17 +289,5 @@ export class TwitterService {
       console.error('Error searching tweets:', error);
       return [];
     }
-  }
-
-  private getMockTrends(): TrendData[] {
-    const mockTrends = [
-      { trend: '#Bitcoin', volume: 125000, url: 'https://twitter.com/search?q=%23Bitcoin', timestamp: Date.now() },
-      { trend: '#AI', volume: 89000, url: 'https://twitter.com/search?q=%23AI', timestamp: Date.now() },
-      { trend: '#Tesla', volume: 67000, url: 'https://twitter.com/search?q=%23Tesla', timestamp: Date.now() },
-      { trend: '#Algorand', volume: 45000, url: 'https://twitter.com/search?q=%23Algorand', timestamp: Date.now() },
-      { trend: '#NFT', volume: 34000, url: 'https://twitter.com/search?q=%23NFT', timestamp: Date.now() }
-    ];
-    
-    return mockTrends;
   }
 }

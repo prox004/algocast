@@ -5,13 +5,14 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import aiRoutes from './routes/ai';
+import dbMarketsRoutes from './routes/markets'; // New TypeScript DB routes
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
 import { getAutoMarketGeneratorService } from './services/autoMarketGenerator.service';
 
 // JS routes (CommonJS)
 const authRoutes = require('./routes/auth');
 const walletRoutes = require('./routes/wallet');
-const marketsRoutes = require('./routes/markets');
+const legacyMarketsRoutes = require('./routes/markets.js'); // Old JS routes for trading
 const { seedMarkets } = require('./seed');
 
 const app = express();
@@ -48,21 +49,32 @@ app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  const hasTwitterAPI = !!(process.env.TWITTER_BEARER_TOKEN || process.env.RAPIDAPI_KEY);
+  const hasAI = !!(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY);
+  
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     services: {
-      twitter: !!process.env.TWITTER_BEARER_TOKEN,
-      openai: !!(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY)
-    }
+      twitter: hasTwitterAPI,
+      openai: hasAI
+    },
+    mode: {
+      twitter: hasTwitterAPI ? 'REAL DATA' : 'NO API KEY - DISABLED',
+      ai: hasAI ? 'REAL AI' : 'NO API KEY - DISABLED',
+      database: 'ENABLED (SQLite)',
+      mockData: 'DISABLED - REAL DATA ONLY'
+    },
+    warning: !hasTwitterAPI || !hasAI ? 'Some services are disabled. Check .env configuration.' : null
   });
 });
 
 // API Routes
 app.use('/auth', authRoutes);
 app.use('/wallet', walletRoutes);
-app.use('/markets', marketsRoutes);
+app.use('/markets/db', dbMarketsRoutes); // New database query routes
+app.use('/markets', legacyMarketsRoutes); // Legacy trading routes
 app.use('/ai', aiRoutes);
 
 // 404 handler

@@ -3,6 +3,8 @@ import { TrendFilterService } from '../services/trendFilter.service';
 import { MarketGeneratorService } from '../services/marketGenerator.service';
 import { ProbabilityService } from '../services/probability.service';
 import { AdvisorService } from '../services/advisor.service';
+import { getDatabase, StoredMarket } from '../services/database.service';
+import { v4 as uuidv4 } from 'uuid';
 
 interface AgentState {
   step: string;
@@ -79,7 +81,11 @@ export class MarketAgent {
       state.step = 'validating_market';
       this.validateMarket(state.generated_market, state.probability_estimate);
 
-      // Step 6: Generate advisory
+      // Step 6: Save to database
+      state.step = 'saving_to_database';
+      this.saveMarketToDatabase(state.generated_market, state.probability_estimate, topTrend);
+
+      // Step 7: Generate advisory
       state.step = 'analyzing_advisory';
       state.advisor_analysis = this.advisorService.analyzeMarket({
         ai_probability: state.probability_estimate.probability,
@@ -155,6 +161,42 @@ export class MarketAgent {
     
     if (failedValidations.length > 0) {
       throw new Error(`Validation failed: ${failedValidations.map(v => v.message).join(', ')}`);
+    }
+  }
+
+  private saveMarketToDatabase(market: any, probability: any, trend: any): void {
+    try {
+      const db = getDatabase();
+      
+      // Check if market already exists for this tweet
+      if (trend.tweet_id && db.marketExistsForTweet(trend.tweet_id)) {
+        console.log(`[MarketAgent] Market already exists for tweet ${trend.tweet_id}, skipping save`);
+        return;
+      }
+
+      const storedMarket: StoredMarket = {
+        id: uuidv4(),
+        question: market.question,
+        data_source: market.data_source,
+        expiry: market.expiry,
+        ai_probability: probability.probability,
+        confidence: market.confidence || probability.confidence,
+        reasoning: market.reasoning || probability.reasoning,
+        suggested_action: market.suggested_action || 'HOLD',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        tweet_id: trend.tweet_id,
+        tweet_author: trend.tweet_author,
+        tweet_content: trend.tweet_content || trend.trend,
+        category: trend.category,
+        volume: trend.volume
+      };
+
+      db.saveMarket(storedMarket);
+      console.log(`[MarketAgent] ✅ Saved market to database: ${storedMarket.id}`);
+    } catch (error) {
+      console.error('[MarketAgent] Failed to save market to database:', error);
+      // Don't throw - allow market generation to continue even if DB save fails
     }
   }
 }

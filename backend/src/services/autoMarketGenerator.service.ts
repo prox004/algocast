@@ -244,18 +244,19 @@ export class AutoMarketGeneratorService {
    */
   private async generateOnce() {
     try {
-      console.log('[AutoMarketGen] Starting cycle...');
+      console.log('\n🔄 [AutoMarketGen] Starting cycle...');
+      console.log('   Looking for REAL tweets from @ptoybuilds...');
 
       // Get up to 3 markets from current trends
       const result = await this.marketAgent.processMarketGeneration();
 
       if (result.error) {
-        console.warn('[AutoMarketGen] Pipeline error:', result.error);
+        console.warn('❌ [AutoMarketGen] Pipeline error:', result.error);
         return;
       }
 
       if (!result.generated_market) {
-        console.log('[AutoMarketGen] No market generated in this cycle');
+        console.log('⚠️  [AutoMarketGen] No market generated in this cycle (no new tweets)');
         return;
       }
 
@@ -263,9 +264,12 @@ export class AutoMarketGeneratorService {
       const probability = result.probability_estimate;
       const advisory = result.advisor_analysis;
 
+      console.log('✅ [AutoMarketGen] Market generated from REAL tweet!');
+      console.log(`   Question: "${market.question}"`);
+
       // Check for duplicate
       if (this.generatedQuestions.has(market.question)) {
-        console.log('[AutoMarketGen] Question already exists, skipping:', market.question);
+        console.log('⏭️  [AutoMarketGen] Question already exists, skipping');
         return;
       }
 
