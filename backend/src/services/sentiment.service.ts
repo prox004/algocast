@@ -35,9 +35,22 @@ interface SentimentResult {
   timestamp: number;
 }
 
+// ── Cache ────────────────────────────────────────────────────────────────────
+
+interface CacheEntry {
+  result: SentimentResult;
+  newsFingerprint: string;   // hash of article titles – invalidates when news changes
+  createdAt: number;
+}
+
+const CACHE_TTL_MS = 30 * 60 * 1000;          // 30 min hard TTL
+const NEWS_CHECK_INTERVAL_MS = 10 * 60 * 1000; // only re-check news every 10 min
+
 export class SentimentService {
   private openai?: OpenAI;
   private newsApiKey?: string;
+  private cache = new Map<string, CacheEntry>();
+  private newsCheckTimestamps = new Map<string, number>(); // marketId → last news check ts
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
@@ -52,14 +65,87 @@ export class SentimentService {
 
   async analyze(marketId: string, question: string, crowdProbability: number): Promise<SentimentResult> {
     try {
-      // STEP 1: Fetch real news FIRST so we can feed it to AI
+      const now = Date.now();
+      const cached = this.cache.get(marketId);
+
+      // ── Fast-path: cache is fresh and within news-check window ───────────
+      if (cached && (now - cached.createdAt) < CACHE_TTL_MS) {
+        const lastCheck = this.newsCheckTimestamps.get(marketId) ?? 0;
+        const needsNewsCheck = (now - lastCheck) >= NEWS_CHECK_INTERVAL_MS;
+
+        if (!needsNewsCheck) {
+          console.log(`[SentimentService] Cache HIT for ${marketId} (age ${Math.round((now - cached.createdAt) / 1000)}s)`);
+          // Update crowd probability in case it changed (cheap operation)
+          return {
+            ...cached.result,
+            analysis: {
+              ...cached.result.analysis,
+              crowd_probability: crowdProbability,
+              divergence: Math.round(Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
+              recommendation: this.generateRecommendation(cached.result.analysis.ai_probability, crowdProbability,
+                Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
+            },
+          };
+        }
+
+        // ── Soft-check: only fetch news to see if anything changed ─────────
+        console.log(`[SentimentService] Checking for new news for ${marketId}...`);
+        this.newsCheckTimestamps.set(marketId, now);
+
+        const freshNews = await this.getNewsSentiment(question);
+        const freshFingerprint = this.fingerprint(freshNews.articles);
+
+        if (freshFingerprint === cached.newsFingerprint) {
+          console.log(`[SentimentService] News unchanged → keeping cache for ${marketId}`);
+          return {
+            ...cached.result,
+            analysis: {
+              ...cached.result.analysis,
+              crowd_probability: crowdProbability,
+              divergence: Math.round(Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
+              recommendation: this.generateRecommendation(cached.result.analysis.ai_probability, crowdProbability,
+                Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
+            },
+          };
+        }
+
+        console.log(`[SentimentService] New news detected → refreshing AI analysis for ${marketId}`);
+        // Fall through to full analysis with the already-fetched news
+        return this.runFullAnalysis(marketId, question, crowdProbability, freshNews);
+      }
+
+      // ── Cache miss or expired → full analysis ────────────────────────────
+      console.log(`[SentimentService] Cache MISS for ${marketId} → running full analysis`);
       const newsSentiment = await this.getNewsSentiment(question);
-      
-      // STEP 2: AI analysis WITH real news context
-      const aiAnalysis = await this.getAISentiment(question, newsSentiment.articles);
-      
-      // Calculate combined sentiment
-      const combinedScore = this.calculateCombinedSentiment(aiAnalysis.score, newsSentiment.score);
+      this.newsCheckTimestamps.set(marketId, now);
+      return this.runFullAnalysis(marketId, question, crowdProbability, newsSentiment);
+    } catch (error) {
+      console.error('[SentimentService] Analysis error:', error);
+      return this.getFallbackSentiment(marketId, question, crowdProbability);
+    }
+  }
+
+  /**
+   * Create a fingerprint from article titles to detect when news changes.
+   */
+  private fingerprint(articles: NewsArticle[]): string {
+    return articles.map(a => a.title).sort().join('|');
+  }
+
+  /**
+   * Run the full AI + news pipeline and cache the result.
+   */
+  private async runFullAnalysis(
+    marketId: string,
+    question: string,
+    crowdProbability: number,
+    newsSentiment: { score: number; confidence: number; articleCount: number; mentions: number; articles: NewsArticle[] }
+  ): Promise<SentimentResult> {
+    // AI analysis WITH real news context
+    const aiAnalysis = await this.getAISentiment(question, newsSentiment.articles);
+    
+    // Calculate combined sentiment
+    const combinedScore = this.calculateCombinedSentiment(aiAnalysis.score, newsSentiment.score);
       
       // Determine sentiment label
       const label = this.getSentimentLabel(combinedScore);
@@ -81,7 +167,7 @@ export class SentimentService {
         ? `${label} sentiment. ${aiAnalysis.reasoning} AI: ${(aiProbability * 100).toFixed(1)}%, Market: ${(crowdProbability * 100).toFixed(1)}%. Momentum: ${momentum}.`
         : this.generateSummary(label, aiProbability, crowdProbability, divergence, momentum);
 
-      return {
+      const result: SentimentResult = {
         success: true,
         market_id: marketId,
         sentiment: {
@@ -105,6 +191,22 @@ export class SentimentService {
         summary,
         timestamp: Date.now()
       };
+
+      // Cache the result
+      this.cache.set(marketId, {
+        result,
+        newsFingerprint: this.fingerprint(newsSentiment.articles),
+        createdAt: Date.now(),
+      });
+
+      // Prune old cache entries (keep max 100)
+      if (this.cache.size > 100) {
+        const oldest = [...this.cache.entries()]
+          .sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
+        if (oldest) this.cache.delete(oldest[0]);
+      }
+
+      return result;
     } catch (error) {
       console.error('[SentimentService] Analysis error:', error);
       // Return fallback sentiment
