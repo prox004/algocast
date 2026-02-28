@@ -2,11 +2,18 @@
  * routes/markets.js
  *
  * GET  /markets              — list all markets
- * POST /markets/generate     — create a new market
+ * GET  /markets/:id          — get single market
+ * POST /markets/generate     — create a new market (optionally on-chain)
  * POST /markets/buy-yes      — buy YES tokens
  * POST /markets/buy-no       — buy NO tokens
  * POST /markets/claim        — claim winnings
- * POST /markets/resolve      — resolve market (open for hackathon)
+ * POST /markets/resolve      — resolve market (open for hackathon demo)
+ *
+ * On-chain mode (when market.app_id is set):
+ *   buy-yes / buy-no  → atomic [PaymentTxn + ABI app-call] via transactionBuilder
+ *   claim             → ABI claim() call via transactionBuilder
+ * Mock mode (app_id is null):
+ *   All accounting done in-memory only (hackathon default)
  */
 
 const express = require('express');
@@ -14,6 +21,12 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const db = require('../db');
 const { createMarketASAs } = require('../algorand/asa');
+const {
+  signBuyGroup,
+  signClaim,
+  broadcast,
+  isContractReady,
+} = require('../algorand/transactionBuilder');
 
 const router = express.Router();
 
@@ -45,7 +58,7 @@ router.get('/:id', (req, res) => {
 // POST /markets/generate (protected)
 router.post('/generate', requireAuth, (req, res) => {
   try {
-    const { question, expiry } = req.body;
+    const { question, expiry, app_id, app_address } = req.body;
     if (!question || typeof question !== 'string' || question.trim() === '') {
       return res.status(400).json({ error: 'question is required' });
     }
@@ -54,18 +67,31 @@ router.post('/generate', requireAuth, (req, res) => {
       return res.status(400).json({ error: 'expiry must be a future unix timestamp' });
     }
 
-    const { yesAsaId, noAsaId } = createMarketASAs();
+    // If no on-chain app_id provided, use mocked ASA IDs (hackathon default)
+    let yesAsaId, noAsaId;
+    if (app_id && app_address) {
+      // Real deployment: caller (deploy.py) provides app_id + yes/no ASA IDs
+      yesAsaId = parseInt(req.body.yes_asa_id, 10) || null;
+      noAsaId  = parseInt(req.body.no_asa_id,  10) || null;
+    } else {
+      const mocked = createMarketASAs();
+      yesAsaId = mocked.yesAsaId;
+      noAsaId  = mocked.noAsaId;
+    }
+
     const market = db.createMarket({
       id: uuidv4(),
       question: question.trim(),
       expiry: expiryTs,
-      ai_probability: 0.5,  // updated by AI route later
+      ai_probability: 0.5,    // updated by AI route later
       yes_asa_id: yesAsaId,
       no_asa_id: noAsaId,
       yes_reserve: 0,
       no_reserve: 0,
       resolved: false,
       outcome: null,
+      app_id:      app_id     ? parseInt(app_id, 10)     : null,
+      app_address: app_address || null,
     });
 
     return res.status(201).json({ market: enrichMarket(market) });
@@ -77,8 +103,16 @@ router.post('/generate', requireAuth, (req, res) => {
 
 // ── Buy helpers ────────────────────────────────────────────────────────────
 
+/**
+ * buyTokens — async handler factory for buy-yes / buy-no.
+ * Behaviour:
+ *   On-chain mode (market.app_id set + contract compiled):
+ *     Builds atomic [PaymentTxn + ABI app-call], broadcasts to TestNet.
+ *   Mock mode (market.app_id is null OR contract not compiled):
+ *     In-memory accounting only (hackathon default).
+ */
 function buyTokens(side) {
-  return (req, res) => {
+  return async (req, res) => {
     try {
       const { market_id, amount } = req.body;
       const microAlgos = parseInt(amount, 10);
@@ -101,13 +135,35 @@ function buyTokens(side) {
         return res.status(400).json({ error: 'Insufficient balance' });
       }
 
-      // Deduct balance
+      // Deduct balance BEFORE any async operation
       db.updateUser(user.id, { balance: user.balance - microAlgos });
 
-      // 1:1 token issuance (hackathon simplification per context.md)
-      const tokens = microAlgos;
+      let txid = null;
 
-      // Update reserves
+      // ── On-chain mode ────────────────────────────────────────────────────
+      if (market.app_id && market.app_address && isContractReady()) {
+        const asaId = side === 'YES' ? market.yes_asa_id : market.no_asa_id;
+        try {
+          const signed = await signBuyGroup(side, {
+            fromAddress:      user.custodial_address,
+            encryptedKey:     user.encrypted_private_key,
+            appId:            market.app_id,
+            appAddress:       market.app_address,
+            asaId,
+            amountMicroAlgos: microAlgos,
+          });
+          txid = await broadcast(signed);
+        } catch (txnErr) {
+          // Rollback balance on txn failure
+          db.updateUser(user.id, { balance: user.balance }); // re-fetch restores
+          console.error(`[buy-${side.toLowerCase()} txn]`, txnErr.message);
+          return res.status(502).json({ error: 'On-chain transaction failed, balance restored' });
+        }
+      }
+
+      // ── In-memory accounting (always runs — keeps DB consistent) ─────────
+      const tokens = microAlgos; // 1:1 hackathon model
+
       if (side === 'YES') {
         db.updateMarket(market.id, { yes_reserve: market.yes_reserve + microAlgos });
       } else {
@@ -124,7 +180,7 @@ function buyTokens(side) {
         timestamp: Math.floor(Date.now() / 1000),
       });
 
-      return res.json({ success: true, tokens, trade });
+      return res.json({ success: true, tokens, trade, txid });
     } catch (err) {
       console.error(`[buy-${side.toLowerCase()}]`, err.message);
       return res.status(500).json({ error: 'Buy failed' });
@@ -141,7 +197,7 @@ router.post('/buy-no', requireAuth, buyTokens('NO'));
 // ── Claim ──────────────────────────────────────────────────────────────────
 
 // POST /markets/claim (protected)
-router.post('/claim', requireAuth, (req, res) => {
+router.post('/claim', requireAuth, async (req, res) => {
   try {
     const { market_id } = req.body;
     if (!market_id) return res.status(400).json({ error: 'market_id is required' });
@@ -164,10 +220,30 @@ router.post('/claim', requireAuth, (req, res) => {
       return res.status(400).json({ error: 'No winning tokens to claim' });
     }
 
-    // Payout = winning tokens (1:1 hackathon model)
-    const payout = totalWinningTokens;
-    const user = db.getUserById(req.user.id);
-    db.updateUser(user.id, { balance: user.balance + payout });
+    const payout = totalWinningTokens; // 1:1 model
+    const user   = db.getUserById(req.user.id);
+    let txid     = null;
+
+    // ── On-chain claim ───────────────────────────────────────────────────────
+    if (market.app_id && isContractReady()) {
+      const winningAsaId = market.outcome === 1 ? market.yes_asa_id : market.no_asa_id;
+      try {
+        const signed = await signClaim({
+          fromAddress:  user.custodial_address,
+          encryptedKey: user.encrypted_private_key,
+          appId:        market.app_id,
+          winningAsaId,
+        });
+        txid = await broadcast(signed);
+        // On-chain payout delivered by contract; DB balance NOT credited (user got real ALGO)
+      } catch (txnErr) {
+        console.error('[claim txn]', txnErr.message);
+        return res.status(502).json({ error: 'On-chain claim failed' });
+      }
+    } else {
+      // Mock mode: credit balance in DB
+      db.updateUser(user.id, { balance: user.balance + payout });
+    }
 
     db.createClaim({
       id: uuidv4(),
@@ -176,7 +252,7 @@ router.post('/claim', requireAuth, (req, res) => {
       claimed_at: Math.floor(Date.now() / 1000),
     });
 
-    return res.json({ success: true, payout });
+    return res.json({ success: true, payout, txid });
   } catch (err) {
     console.error('[claim]', err.message);
     return res.status(500).json({ error: 'Claim failed' });

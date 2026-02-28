@@ -1,0 +1,7 @@
+# contracts/.gitignore
+__pycache__/
+*.pyc
+*.pyo
+build/*.teal
+build/*.json
+node_modules/

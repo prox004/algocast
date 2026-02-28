@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import { withdraw, formatAlgo } from '@/lib/api';
 
-interface Props {
-  onSuccess: () => void;
+interface WithdrawFormProps {
+  onSuccess?: () => void;
 }
 
-export default function WithdrawForm({ onSuccess }: Props) {
+export default function WithdrawForm({ onSuccess }: WithdrawFormProps) {
   const [toAddress, setToAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [msg, setMsg] = useState('');
@@ -29,7 +29,7 @@ export default function WithdrawForm({ onSuccess }: Props) {
       setMsg(`Withdrawn! Tx: ${res.txid} — New balance: ${formatAlgo(res.balance)}`);
       setToAddress('');
       setAmount('');
-      onSuccess();
+      onSuccess?.();
     } catch (err: any) {
       setIsError(true);
       setMsg(err.message);

@@ -1,17 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { buyYes, buyNo, formatAlgo, type Market } from '@/lib/api';
 
 interface Props {
   market: Market;
-  onTrade: () => void;
+  onTrade?: () => void;
 }
 
 export default function BuyPanel({ market, onTrade }: Props) {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+
+  const handleTrade = useCallback(() => {
+    onTrade?.();
+  }, [onTrade]);
 
   async function handleBuy(side: 'YES' | 'NO') {
     setMsg('');
@@ -23,7 +27,7 @@ export default function BuyPanel({ market, onTrade }: Props) {
       const res = await fn(market.id, micro);
       setMsg(`Bought ${res.tokens.toLocaleString()} ${side} tokens!`);
       setAmount('');
-      onTrade();
+      handleTrade();
     } catch (err: any) {
       setMsg(err.message);
     } finally {

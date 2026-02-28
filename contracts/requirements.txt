@@ -1,0 +1,6 @@
+# CastAlgo contract Python dependencies
+# Install with: pip install -r contracts/requirements.txt
+
+pyteal==0.26.1
+py-algorand-sdk>=2.5.0
+python-dotenv>=1.0.0

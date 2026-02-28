@@ -1,32 +1,55 @@
 # CastAlgo — Single Source of Truth
 
-> Last updated: 2026-02-28
-> All architecture, API contracts, DB schemas, and integration rules live here.
+> Last updated: 2026-02-28 (Unified: AI + Contracts + Backend)
+> All architecture, API contracts, DB schemas, smart contract specs, and integration rules live here.
 > Every code change MUST align with this document.
+> No module may introduce structural changes without updating this file.
 
 ---
 
-## Project Overview
+# Project Overview
 
-**CastAlgo** is an AI-powered autonomous prediction market protocol built on Algorand TestNet.
+**CastAlgo** is an AI-powered autonomous prediction market protocol built on **Algorand TestNet**.
 
-- Detects Twitter trends → creates YES/NO prediction markets
-- Deploys markets on Algorand using ASA tokens
-- Uses a **custodial wallet system** (backend controls private keys)
-- Users buy YES/NO tokens, redeem winnings, and withdraw ALGO
-- AI module provides probability estimates per market
+Core Flow:
+
+1. AI scans trends (mock data for hackathon)
+2. AI generates structured YES/NO market with probability
+3. Backend creates market record
+4. Smart contract deployed per market (ARC-4 PyTeal)
+5. Users buy YES/NO tokens (custodial wallet model)
+6. Market resolves
+7. Users claim winnings
+8. Users withdraw real ALGO
+
+System uses:
+
+- Custodial wallet model
+- AES-256 encrypted private keys
+- PyTeal ARC-4 smart contracts
+- In-memory DB (hackathon)
+- OpenAI (or mock) for AI probability
 
 ---
 
-## Repository Structure
+# Repository Structure
 
 ```
 AlgoCast/
-├── context.md                  ← this file (single source of truth)
+├── context.md                  ← THIS FILE (single source of truth)
+
+├── contracts/                  ← Dev A (Smart Contracts Layer)
+│   ├── app.py
+│   ├── market_logic.py
+│   ├── asa_utils.py
+│   ├── wallet_manager.ts
+│   ├── deploy.py
+│   └── config.py
+
 ├── backend/                    ← Node.js + Express
 │   ├── src/
-│   │   ├── index.js            ← entry point
-│   │   ├── db.js               ← in-memory DB (hackathon)
+│   │   ├── index.js
+│   │   ├── db.js
 │   │   ├── wallet/
 │   │   │   └── custodialWallet.js
 │   │   ├── routes/
@@ -41,9 +64,10 @@ AlgoCast/
 │   │       └── asa.js
 │   ├── .env.example
 │   └── package.json
-└── frontend/                   ← Next.js App Router
+
+└── frontend/                   ← Dev C (Next.js 14)
     ├── app/
-    │   ├── page.tsx            ← / (market dashboard)
+    │   ├── page.tsx
     │   ├── market/[id]/page.tsx
     │   ├── login/page.tsx
     │   └── wallet/page.tsx
@@ -54,97 +78,120 @@ AlgoCast/
     │   ├── WalletBalance.tsx
     │   └── WithdrawForm.tsx
     ├── lib/
-    │   └── api.ts              ← all fetch calls to backend
+    │   └── api.ts
     ├── .env.local.example
     └── package.json
 ```
 
 ---
 
-## Tech Stack
+# Tech Stack
 
 | Layer | Tech |
 |-------|------|
-| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS |
+| Frontend | Next.js 14, TypeScript, Tailwind |
 | Backend | Node.js 20, Express 4 |
-| Blockchain | Algorand TestNet, algosdk |
-| Auth | JWT (jsonwebtoken) |
-| Encryption | AES-256-CBC (Node crypto) |
-| DB | In-memory JS store (hackathon) |
-| AI | OpenAI API (gpt-4o) or mock |
+| Blockchain | Algorand TestNet |
+| Smart Contract | PyTeal ARC-4 ABI |
+| Wallet Signing | algosdk (JS) |
+| Auth | JWT |
+| Encryption | AES-256-CBC |
+| DB | In-memory JS store |
+| AI | OpenAI GPT-4o (or mock) |
 
 ---
 
-## Custodial Wallet Model
+# Team Responsibilities
 
-### On Registration
-1. Backend generates Algorand keypair (`algosdk.generateAccount()`)
-2. Private key → encrypted with AES-256 using `WALLET_ENCRYPTION_SECRET`
-3. `{ custodial_address, encrypted_private_key }` stored in user record
-4. Plain private key NEVER persisted or returned to frontend
+| Dev | Owns |
+|-----|------|
+| Dev A | Smart contracts, ASA creation, buy/claim/resolve logic, custodial signing, withdraw |
+| Dev B | AI engine, trend scanning (mock), OpenAI integration |
+| Dev C | Frontend UI, Next.js pages, components |
 
-### Rules
-- `encrypted_private_key` is NEVER sent to frontend
-- Decryption only happens inside transaction execution functions
-- All txns signed server-side
+---
 
-### Encryption scheme
+# Custodial Wallet Model
+
+## On Registration
+
+1. Generate Algorand keypair
+2. Encrypt private key using AES-256-CBC
+3. Store:
+   - custodial_address
+   - encrypted_private_key
+4. Never return private key to frontend
+
+---
+
+## Encryption Scheme
+
 ```
 algorithm : aes-256-cbc
-key       : sha256(WALLET_ENCRYPTION_SECRET)  → 32 bytes
-iv        : random 16 bytes, prepended to ciphertext (hex:hex)
+key       : sha256(WALLET_ENCRYPTION_SECRET)
+iv        : random 16 bytes
 stored as : "<iv_hex>:<ciphertext_hex>"
 ```
 
+Rules:
+
+- Decrypt only inside transaction functions
+- Never log decrypted keys
+- WALLET_ENCRYPTION_SECRET stored in .env only
+
 ---
 
-## Database Schema (In-Memory)
+# Database Schema (In-Memory)
 
-### Users
+## Users
+
 ```js
 {
-  id: string (uuid),
+  id: string,
   email: string,
-  hashed_password: string (bcrypt),
+  hashed_password: string,
   custodial_address: string,
   encrypted_private_key: string,
-  balance: number  // ALGO balance in microAlgos
+  balance: number
 }
 ```
 
-### Markets
+## Markets
+
 ```js
 {
-  id: string (uuid),
+  id: string,
   question: string,
-  expiry: number,        // unix timestamp
-  ai_probability: number, // 0-1
+  expiry: number,
+  ai_probability: number,
   yes_asa_id: number | null,
   no_asa_id: number | null,
   yes_reserve: number,
   no_reserve: number,
   resolved: boolean,
-  outcome: 0 | 1 | null  // 0=NO wins, 1=YES wins
+  outcome: 0 | 1 | null
 }
 ```
 
-### Trades
+## Trades
+
 ```js
 {
-  id: string (uuid),
+  id: string,
   user_id: string,
   market_id: string,
   side: 'YES' | 'NO',
-  amount: number,   // microAlgos spent
-  tokens: number,   // tokens received
+  amount: number,
+  tokens: number,
   timestamp: number
 }
 ```
 
-### Claims
+## Claims
+
 ```js
 {
-  id: string (uuid),
+  id: string,
   user_id: string,
   market_id: string,
   claimed_at: number
@@ -153,12 +200,13 @@ stored as : "<iv_hex>:<ciphertext_hex>"
 
 ---
 
-## API Contract
+# API Contract
 
-### Base URL
-- Development: `http://localhost:4000`
+Base URL:
+```
+http://localhost:4000
+```
 
-### Auth Headers
 All protected routes require:
 ```
 Authorization: Bearer <jwt_token>
@@ -166,190 +214,213 @@ Authorization: Bearer <jwt_token>
 
 ---
 
-### AUTH
+# AUTH
 
-#### POST /register
+## POST /register
+
 Request:
 ```json
 { "email": "string", "password": "string" }
 ```
+
 Response:
 ```json
 { "token": "jwt", "user": { "id", "email", "custodial_address", "balance" } }
 ```
 
-#### POST /login
-Request:
-```json
-{ "email": "string", "password": "string" }
-```
-Response:
-```json
-{ "token": "jwt", "user": { "id", "email", "custodial_address", "balance" } }
-```
+## POST /login
+
+Same response structure.
 
 ---
 
-### WALLET
+# WALLET
 
-#### POST /deposit  *(protected)*
+## POST /deposit (protected)
+
 Request:
 ```json
-{ "amount": number }  // microAlgos
+{ "amount": number }
 ```
+
 Response:
 ```json
 { "success": true, "balance": number }
 ```
-Note: For hackathon, this directly credits balance (no real on-chain deposit required in demo mode).
 
-#### POST /withdraw  *(protected)*
+(Hackathon: directly credits balance.)
+
+---
+
+## POST /withdraw (protected)
+
 Request:
 ```json
 { "to_address": "string", "amount": number }
 ```
-Response:
-```json
-{ "success": true, "txid": "string", "balance": number }
-```
+
 Rules:
-- amount ≤ user.balance
-- Deduct balance BEFORE broadcasting txn
+- amount ≤ balance
+- deduct before broadcasting
 
 ---
 
-### MARKETS
+# MARKETS
 
-#### GET /markets
-Response:
-```json
-[
-  {
-    "id", "question", "expiry", "ai_probability",
-    "yes_asa_id", "no_asa_id",
-    "yes_reserve", "no_reserve",
-    "resolved", "outcome",
-    "market_probability": number  // yes_reserve / (yes_reserve + no_reserve)
-  }
-]
+## GET /markets
+
+Returns all markets with computed:
+
+```
+market_probability = yes_reserve / (yes_reserve + no_reserve)
 ```
 
-#### POST /generate-market  *(protected)*
+---
+
+## POST /generate-market (protected)
+
 Request:
 ```json
 { "question": "string", "expiry": number }
 ```
-Response:
-```json
-{ "market": { ...market object } }
-```
-Note: Creates market record + (in hackathon) mocks ASA IDs.
 
-#### POST /buy-yes  *(protected)*
-Request:
-```json
-{ "market_id": "string", "amount": number }
-```
-Response:
-```json
-{ "success": true, "tokens": number, "trade": { ...trade object } }
-```
+Creates market record.
+
+---
+
+## POST /buy-yes (protected)
+
 Rules:
 - amount > 0
-- market not resolved
-- market not expired
-- user.balance >= amount
-- tokens = amount (1:1 for simplicity in hackathon)
+- not expired
+- not resolved
+- balance ≥ amount
+- tokens = amount (1:1 hackathon simplification)
 
-#### POST /buy-no  *(protected)*
-Same shape as buy-yes.
+Same shape for `/buy-no`.
 
-#### POST /claim  *(protected)*
-Request:
-```json
-{ "market_id": "string" }
-```
-Response:
-```json
-{ "success": true, "payout": number }
-```
+---
+
+## POST /claim (protected)
+
 Rules:
-- market.resolved === true
-- user has winning-side tokens
-- no prior claim for (user_id, market_id)
+- market resolved
+- user owns winning tokens
+- no prior claim
 
-#### POST /resolve  *(protected, admin only in prod — open for hackathon)*
+---
+
+## POST /resolve (protected)
+
 Request:
 ```json
 { "market_id": "string", "outcome": 0 | 1 }
 ```
-Response:
-```json
-{ "success": true }
+
+---
+
+# Smart Contract (Dev A)
+
+Each market = one ARC-4 app.
+
+Global State:
+
+```
+question
+close_ts
+yes_asa_id
+no_asa_id
+yes_reserve
+no_reserve
+resolved
+outcome
+creator
 ```
 
 ---
 
-### AI
+# ABI Methods
 
-#### GET /ai-analysis/:market_id
-Response:
-```json
-{
-  "market_id": "string",
-  "ai_probability": number,
-  "summary": "string",
-  "sentiment": "BULLISH" | "BEARISH" | "NEUTRAL"
-}
+| Method | Args |
+|--------|------|
+| create_market | question, close_ts |
+| buy_yes | payment txn |
+| buy_no | payment txn |
+| resolve_market | outcome |
+| claim | — |
+| withdraw | amount |
+
+---
+
+# Pricing Model
+
+```
+Probability(YES) = yes_reserve / (yes_reserve + no_reserve)
+tokens_issued = amount (1:1)
 ```
 
 ---
 
-## Frontend ↔ Backend Integration Rules
+# AI Engine (Dev B)
 
-1. All API calls go through `frontend/lib/api.ts`
-2. JWT stored in `localStorage` under key `castalgo_token`
-3. Frontend never receives or stores `encrypted_private_key`
-4. Amount fields always in **microAlgos** (integer)
-5. Probability displayed as percentage: `(value * 100).toFixed(1)%`
-6. Market expired = `Date.now() / 1000 > market.expiry`
+Hackathon rule:
+Real Twitter API NOT required.
+Mock trend data allowed.
 
----
+AI Responsibilities:
 
-## Algorand Notes
-
-- Network: **TestNet**
-- Algod endpoint: `https://testnet-api.algonode.cloud` (free, no key needed)
-- Indexer: `https://testnet-idx.algonode.cloud`
-- Minimum balance: 0.1 ALGO per account + 0.1 per ASA opted-in
-- For hackathon: ASA creation mocked; real on-chain txns for withdraw only
+- Generate binary YES/NO markets
+- Assign ai_probability (0–1)
+- Provide reasoning
+- No blockchain calls
 
 ---
 
-## Security Rules
+# AI Market Rules
 
-- AES-256-CBC encrypt all private keys at rest
-- `WALLET_ENCRYPTION_SECRET` ≥ 32 chars, stored in `.env` only
-- JWT secret: `JWT_SECRET` in `.env`
-- Never log private keys or decrypted keys
-- Validate all numeric inputs (positive, integer)
-- Prevent double claims via Claims table lookup
-- Prevent withdrawal above balance (check before deduct)
-- Disable buy routes when `market.resolved || market.expiry < Date.now()/1000`
+Every AI-generated market MUST:
+
+- Be binary
+- Include measurable condition
+- Include exact UTC expiry
+- Include objective data source
+- Be resolvable
+- No vague wording
 
 ---
 
-## Hackathon Priorities
+# Security Rules
 
-**DO build:**
-- Custodial wallet create + encrypt
-- Deposit (mock credit) + Withdraw (real txn)
+- AES-256 encryption mandatory
+- Validate numeric inputs
+- Prevent double claim
+- Prevent withdrawal above balance
+- Disable buy when expired or resolved
+
+---
+
+# Frontend Integration Rules
+
+1. All calls via `frontend/lib/api.ts`
+2. JWT in localStorage as `castalgo_token`
+3. Never expose encrypted_private_key
+4. Amounts always microAlgos
+5. Display probability as `(value * 100).toFixed(1)%`
+
+---
+
+# Hackathon Scope
+
+DO build:
+- Custodial wallet
+- Deposit + withdraw
 - Market create + buy + resolve + claim
-- AI probability endpoint (GPT or mock)
-- Clean frontend UI
+- AI probability endpoint
+- Clean UI
+- Deploy PyTeal to TestNet
 
-**DO NOT build:**
+DO NOT build:
 - On-chain AMM
 - Decentralized oracle
 - Dispute system
-- Real Twitter API (mock trend data is fine)
+- Real Twitter ingestion
