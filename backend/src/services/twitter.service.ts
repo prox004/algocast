@@ -16,7 +16,7 @@ interface TrendData {
 
 // Influential accounts to monitor for prediction market signals
 const INFLUENTIAL_ACCOUNTS = [
-  'ptoybuilds', 'elonmusk', 'VitalikButerin', 'cz_binance', 'SBF_FTX', 'APompliano'
+  'ptoybuilds'
 ];
 
 /**
@@ -54,12 +54,13 @@ export class TwitterService {
       console.warn('TWITTER_BEARER_TOKEN not set, using mock data only');
     }
 
-    // Baseline all accounts to NOW so the first poll only catches future tweets
-    const now = Date.now();
+    // Look back 24 hours on startup to get recent tweets for market generation
+    const lookbackMs = 24 * 60 * 60 * 1000; // 24 hours
+    const startTime = Date.now() - lookbackMs;
     for (const account of INFLUENTIAL_ACCOUNTS) {
-      this.accountSince.set(account, now);
+      this.accountSince.set(account, startTime);
     }
-    console.log(`[TwitterService] Cursors initialised at ${new Date(now).toISOString()} for ${INFLUENTIAL_ACCOUNTS.length} accounts`);
+    console.log(`[TwitterService] Cursors initialised at ${new Date(startTime).toISOString()} for ${INFLUENTIAL_ACCOUNTS.length} accounts`);
   }
 
   /**

@@ -97,24 +97,35 @@ No extra text. No markdown. No explanations outside JSON.`
 
   private buildMarketPrompt(request: MarketRequest): string {
     const now = new Date();
-    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const dayAfter = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    const in1Hour = new Date(now.getTime() + 1 * 60 * 60 * 1000);
+    const in6Hours = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+    const in12Hours = new Date(now.getTime() + 12 * 60 * 60 * 1000);
+    const in24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const in48Hours = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
     return `
-Trending Topic: ${request.trend}
+Tweet/Trend Content: ${request.trend}
 Category: ${request.category}
-Volume: ${request.volume} mentions
+Engagement: ${request.volume} interactions
 Current Time: ${now.toISOString()}
 
-Create a binary prediction market for this trend. Consider:
-- Market should resolve within 24-48 hours
-- Use reliable data sources (official websites, exchanges, news APIs)
-- Make it objectively measurable
-- Estimate probability based on historical patterns and current context
+Create a binary prediction market based on this tweet/trend. 
 
-Example expiry times:
-- Tomorrow: ${tomorrow.toISOString()}
-- Day after: ${dayAfter.toISOString()}
+CRITICAL REQUIREMENTS:
+1. Question must be directly about the tweet content (e.g., if Elon tweets about Tesla stock, ask "Will Tesla stock reach $X within Y hours?")
+2. Choose appropriate duration based on tweet urgency:
+   - Breaking news/price predictions: 1-6 hours
+   - Announcements/events: 6-24 hours
+   - Long-term predictions: 24-48 hours
+3. Use measurable criteria (stock prices, official announcements, verified sources)
+4. Make expiry time realistic for the prediction type
+
+Example expiry options:
+- Very Short (1h):  ${in1Hour.toISOString()}
+- Short (6h):      ${in6Hours.toISOString()}
+- Medium (12h):    ${in12Hours.toISOString()}
+- Standard (24h):  ${in24Hours.toISOString()}
+- Extended (48h):  ${in48Hours.toISOString()}
 
 Generate the market now.`;
   }
