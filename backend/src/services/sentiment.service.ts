@@ -14,15 +14,15 @@ interface SentimentResult {
   success: boolean;
   market_id: string;
   sentiment: {
-    score: number; // -1 to 1 (negative to positive)
+    score: number;
     label: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-    confidence: number; // 0 to 1
+    confidence: number;
     momentum: 'RISING' | 'FALLING' | 'STABLE';
   };
   analysis: {
     ai_probability: number;
     crowd_probability: number;
-    divergence: number; // Percentage difference
+    divergence: number;
     recommendation: 'BUY YES' | 'BUY NO' | 'HOLD';
   };
   sources: {
@@ -39,23 +39,23 @@ interface SentimentResult {
 
 interface CacheEntry {
   result: SentimentResult;
-  newsFingerprint: string;   // hash of article titles – invalidates when news changes
+  newsFingerprint: string;
   createdAt: number;
 }
 
-const CACHE_TTL_MS = 30 * 60 * 1000;          // 30 min hard TTL
-const NEWS_CHECK_INTERVAL_MS = 10 * 60 * 1000; // only re-check news every 10 min
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const NEWS_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 export class SentimentService {
   private openai?: OpenAI;
   private newsApiKey?: string;
   private cache = new Map<string, CacheEntry>();
-  private newsCheckTimestamps = new Map<string, number>(); // marketId → last news check ts
+  private newsCheckTimestamps = new Map<string, number>();
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
     if (apiKey) {
-      this.openai = new OpenAI({ 
+      this.openai = new OpenAI({
         apiKey,
         baseURL: process.env.OPENROUTER_API_KEY ? 'https://openrouter.ai/api/v1' : undefined
       });
@@ -75,15 +75,17 @@ export class SentimentService {
 
         if (!needsNewsCheck) {
           console.log(`[SentimentService] Cache HIT for ${marketId} (age ${Math.round((now - cached.createdAt) / 1000)}s)`);
-          // Update crowd probability in case it changed (cheap operation)
           return {
             ...cached.result,
             analysis: {
               ...cached.result.analysis,
               crowd_probability: crowdProbability,
               divergence: Math.round(Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
-              recommendation: this.generateRecommendation(cached.result.analysis.ai_probability, crowdProbability,
-                Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
+              recommendation: this.generateRecommendation(
+                cached.result.analysis.ai_probability,
+                crowdProbability,
+                Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100
+              ),
             },
           };
         }
@@ -103,14 +105,16 @@ export class SentimentService {
               ...cached.result.analysis,
               crowd_probability: crowdProbability,
               divergence: Math.round(Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
-              recommendation: this.generateRecommendation(cached.result.analysis.ai_probability, crowdProbability,
-                Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100),
+              recommendation: this.generateRecommendation(
+                cached.result.analysis.ai_probability,
+                crowdProbability,
+                Math.abs(cached.result.analysis.ai_probability - crowdProbability) * 100
+              ),
             },
           };
         }
 
         console.log(`[SentimentService] New news detected → refreshing AI analysis for ${marketId}`);
-        // Fall through to full analysis with the already-fetched news
         return this.runFullAnalysis(marketId, question, crowdProbability, freshNews);
       }
 
@@ -119,51 +123,33 @@ export class SentimentService {
       const newsSentiment = await this.getNewsSentiment(question);
       this.newsCheckTimestamps.set(marketId, now);
       return this.runFullAnalysis(marketId, question, crowdProbability, newsSentiment);
-    } catch (error) {
+    } catch (error: any) {
       console.error('[SentimentService] Analysis error:', error);
       return this.getFallbackSentiment(marketId, question, crowdProbability);
     }
   }
 
-  /**
-   * Create a fingerprint from article titles to detect when news changes.
-   */
   private fingerprint(articles: NewsArticle[]): string {
     return articles.map(a => a.title).sort().join('|');
   }
 
-  /**
-   * Run the full AI + news pipeline and cache the result.
-   */
   private async runFullAnalysis(
     marketId: string,
     question: string,
     crowdProbability: number,
     newsSentiment: { score: number; confidence: number; articleCount: number; mentions: number; articles: NewsArticle[] }
   ): Promise<SentimentResult> {
-    // AI analysis WITH real news context
-    const aiAnalysis = await this.getAISentiment(question, newsSentiment.articles);
-    
-    // Calculate combined sentiment
-    const combinedScore = this.calculateCombinedSentiment(aiAnalysis.score, newsSentiment.score);
-      
-      // Determine sentiment label
+    try {
+      const aiAnalysis = await this.getAISentiment(question, newsSentiment.articles);
+
+      const combinedScore = this.calculateCombinedSentiment(aiAnalysis.score, newsSentiment.score);
       const label = this.getSentimentLabel(combinedScore);
-      
-      // Calculate momentum
       const momentum = this.calculateMomentum(combinedScore, aiAnalysis.confidence);
-      
-      // Calculate AI probability from sentiment
       const aiProbability = this.sentimentToProbability(combinedScore);
-      
-      // Calculate divergence
       const divergence = Math.abs(aiProbability - crowdProbability) * 100;
-      
-      // Generate recommendation
       const recommendation = this.generateRecommendation(aiProbability, crowdProbability, divergence);
-      
-      // Generate summary — use AI reasoning if available, else generic
-      const summary = aiAnalysis.reasoning 
+
+      const summary = aiAnalysis.reasoning
         ? `${label} sentiment. ${aiAnalysis.reasoning} AI: ${(aiProbability * 100).toFixed(1)}%, Market: ${(crowdProbability * 100).toFixed(1)}%. Momentum: ${momentum}.`
         : this.generateSummary(label, aiProbability, crowdProbability, divergence, momentum);
 
@@ -192,14 +178,12 @@ export class SentimentService {
         timestamp: Date.now()
       };
 
-      // Cache the result
       this.cache.set(marketId, {
         result,
         newsFingerprint: this.fingerprint(newsSentiment.articles),
         createdAt: Date.now(),
       });
 
-      // Prune old cache entries (keep max 100)
       if (this.cache.size > 100) {
         const oldest = [...this.cache.entries()]
           .sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
@@ -207,9 +191,8 @@ export class SentimentService {
       }
 
       return result;
-    } catch (error) {
-      console.error('[SentimentService] Analysis error:', error);
-      // Return fallback sentiment
+    } catch (error: any) {
+      console.error('[SentimentService] Full analysis error:', error);
       return this.getFallbackSentiment(marketId, question, crowdProbability);
     }
   }
@@ -228,12 +211,6 @@ export class SentimentService {
 
   // ── STEP 1: AI understands MEANING of the question ────────────────────────
 
-  /**
-   * Use AI to deeply understand the question's meaning and produce:
-   * - A summary of what the question is really about
-   * - 2-3 precise NewsAPI search queries covering different angles
-   * - Key entities/actors involved
-   */
   private async understandQuestion(question: string): Promise<{
     topic: string;
     queries: string[];
@@ -284,7 +261,7 @@ Respond with ONLY valid JSON, no markdown.`;
         entities: parsed.entities || [],
         context: parsed.context || '',
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('[SentimentService] AI meaning extraction error:', error);
       return this.understandQuestionFallback(question);
     }
@@ -296,7 +273,6 @@ Respond with ONLY valid JSON, no markdown.`;
     entities: string[];
     context: string;
   } {
-    // Extract proper nouns as entities
     const stopCapitalized = new Set([
       'Will', 'The', 'Does', 'Can', 'Could', 'Should', 'What', 'How', 'When',
       'Where', 'Which', 'Who', 'Before', 'After', 'During', 'Within', 'Next',
@@ -305,13 +281,12 @@ Respond with ONLY valid JSON, no markdown.`;
 
     const entities = question
       .split(/\s+/)
-      .filter(w => /^[A-Z]/.test(w) && w.length > 2 && !stopCapitalized.has(w))
-      .map(w => w.replace(/[^a-zA-Z0-9'-]/g, ''))
-      .filter(w => w.length > 2);
+      .filter((w: string) => /^[A-Z]/.test(w) && w.length > 2 && !stopCapitalized.has(w))
+      .map((w: string) => w.replace(/[^a-zA-Z0-9'-]/g, ''))
+      .filter((w: string) => w.length > 2);
 
     const uniqueEntities = [...new Set(entities)];
 
-    // Build a reasonable query from entities
     const queries: string[] = [];
     if (uniqueEntities.length >= 2) {
       queries.push(uniqueEntities.map(e => `"${e}"`).join(' AND '));
@@ -339,10 +314,9 @@ Respond with ONLY valid JSON, no markdown.`;
     }
 
     try {
-      // Build news context block from real articles
       let newsContext = '';
       if (newsArticles.length > 0) {
-        const headlines = newsArticles.slice(0, 10).map((a, i) => 
+        const headlines = newsArticles.slice(0, 10).map((a: NewsArticle, i: number) =>
           `${i + 1}. [${a.source}] "${a.title}" (${a.sentiment})`
         ).join('\n');
         newsContext = `\n\nREAL-TIME NEWS (fetched just now — use these to inform your analysis):\n${headlines}\n\nBase your analysis heavily on these real news articles. They represent the current state of events.`;
@@ -388,7 +362,7 @@ Respond with ONLY valid JSON, no markdown.`;
         trendVolume: 75000,
         reasoning: parsed.reasoning || ''
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('[SentimentService] AI sentiment error:', error);
       return { score: 0, confidence: 0.5, trendVolume: 50000, reasoning: '' };
     }
@@ -396,12 +370,13 @@ Respond with ONLY valid JSON, no markdown.`;
 
   // ── STEP 3: Fetch news using meaning-derived queries ──────────────────────
 
-  private async getNewsSentiment(question: string): Promise<{ score: number; confidence: number; articleCount: number; mentions: number; articles: NewsArticle[] }> {
+  private async getNewsSentiment(
+    question: string
+  ): Promise<{ score: number; confidence: number; articleCount: number; mentions: number; articles: NewsArticle[] }> {
     if (!this.newsApiKey) {
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
 
-    // Step 1: Understand the meaning of the question
     const understanding = await this.understandQuestion(question);
 
     if (understanding.queries.length === 0) {
@@ -409,7 +384,6 @@ Respond with ONLY valid JSON, no markdown.`;
     }
 
     try {
-      // Step 2: Fetch articles from multiple queries (different angles)
       const allArticles: any[] = [];
       const seenUrls = new Set<string>();
 
@@ -434,7 +408,7 @@ Respond with ONLY valid JSON, no markdown.`;
             }
           }
           console.log(`[SentimentService] Query "${query}" → ${response.data.articles?.length || 0} articles`);
-        } catch (err) {
+        } catch (err: any) {
           console.warn(`[SentimentService] Query failed: "${query}"`);
         }
       }
@@ -443,16 +417,14 @@ Respond with ONLY valid JSON, no markdown.`;
         return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
       }
 
-      // Step 3: Use AI to judge relevance of each article
       const relevantArticles = await this.filterByRelevance(
         allArticles,
         understanding.topic,
         understanding.entities
       );
 
-      // Step 4: Score sentiment on relevant articles only
       return this.scoreSentiment(relevantArticles);
-    } catch (error) {
+    } catch (error: any) {
       console.error('[SentimentService] News sentiment error:', error);
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
@@ -460,24 +432,18 @@ Respond with ONLY valid JSON, no markdown.`;
 
   // ── STEP 4: AI-powered relevance filtering ───────────────────────────────
 
-  /**
-   * Send article headlines to AI in a single batch and ask which ones
-   * are actually relevant to the topic. Much more precise than keyword matching.
-   */
   private async filterByRelevance(
     articles: any[],
     topic: string,
     entities: string[]
   ): Promise<{ article: any; relevance: number; sentimentLabel: 'positive' | 'negative' | 'neutral' }[]> {
-    // Build article list for AI to evaluate
-    const articleList = articles.slice(0, 25).map((a, i) => ({
+    const articleList = articles.slice(0, 25).map((a: any, i: number) => ({
       idx: i,
       title: (a.title || '').substring(0, 120),
       source: a.source?.name || 'Unknown',
     }));
 
     if (!this.openai || articleList.length === 0) {
-      // Fallback: basic entity matching
       return this.fallbackRelevanceFilter(articles, entities);
     }
 
@@ -487,7 +453,7 @@ Respond with ONLY valid JSON, no markdown.`;
 Key entities: ${entities.join(', ')}
 
 Here are ${articleList.length} article headlines:
-${articleList.map(a => `[${a.idx}] "${a.title}" — ${a.source}`).join('\n')}
+${articleList.map((a: any) => `[${a.idx}] "${a.title}" — ${a.source}`).join('\n')}
 
 For EACH article, rate its relevance to the topic on a scale of 0-10:
 - 10 = directly about the topic/event
@@ -520,32 +486,28 @@ Respond with ONLY a valid JSON array, no markdown.`;
           results.push({
             article: articles[rating.idx],
             relevance: rating.relevance,
-            sentimentLabel: (['positive', 'negative', 'neutral'].includes(rating.sentiment) 
-              ? rating.sentiment 
+            sentimentLabel: (['positive', 'negative', 'neutral'].includes(rating.sentiment)
+              ? rating.sentiment
               : 'neutral') as 'positive' | 'negative' | 'neutral',
           });
         }
       }
 
-      // Sort by relevance (highest first)
       results.sort((a, b) => b.relevance - a.relevance);
 
       console.log(`[SentimentService] AI relevance filter: ${results.length} relevant out of ${articleList.length} evaluated`);
       return results;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[SentimentService] AI relevance filter error:', error);
       return this.fallbackRelevanceFilter(articles, entities);
     }
   }
 
-  /**
-   * Fallback relevance filter using entity name matching when AI is unavailable.
-   */
   private fallbackRelevanceFilter(
     articles: any[],
     entities: string[]
   ): { article: any; relevance: number; sentimentLabel: 'positive' | 'negative' | 'neutral' }[] {
-    const lowerEntities = entities.map(e => e.toLowerCase());
+    const lowerEntities = entities.map((e: string) => e.toLowerCase());
     const results: { article: any; relevance: number; sentimentLabel: 'positive' | 'negative' | 'neutral' }[] = [];
 
     const positiveWords = ['confirm', 'approve', 'success', 'peace', 'deal', 'agreement', 'surge', 'rise', 'rally', 'gain'];
@@ -553,9 +515,8 @@ Respond with ONLY a valid JSON array, no markdown.`;
 
     for (const article of articles) {
       const text = `${article.title || ''} ${article.description || ''}`.toLowerCase();
-      
-      // Count how many entities appear
-      const matchCount = lowerEntities.filter(ent => text.includes(ent)).length;
+
+      const matchCount = lowerEntities.filter((ent: string) => text.includes(ent)).length;
       if (matchCount === 0) continue;
 
       const relevance = Math.min(10, matchCount * 4 + 2);
@@ -615,7 +576,6 @@ Respond with ONLY a valid JSON array, no markdown.`;
   }
 
   private calculateCombinedSentiment(aiScore: number, newsScore: number): number {
-    // Weight AI more heavily (70%) than news (30%)
     return (aiScore * 0.7) + (newsScore * 0.3);
   }
 
@@ -627,7 +587,6 @@ Respond with ONLY a valid JSON array, no markdown.`;
 
   private calculateMomentum(score: number, confidence: number): 'RISING' | 'FALLING' | 'STABLE' {
     const strength = Math.abs(score) * confidence;
-    
     if (strength > 0.5) {
       return score > 0 ? 'RISING' : 'FALLING';
     }
@@ -635,52 +594,45 @@ Respond with ONLY a valid JSON array, no markdown.`;
   }
 
   private sentimentToProbability(score: number): number {
-    // Convert sentiment score (-1 to 1) to probability (0 to 1)
-    // Score of 0 = 50% probability
-    // Score of 1 = 75% probability
-    // Score of -1 = 25% probability
     return 0.5 + (score * 0.25);
   }
 
   private generateRecommendation(aiProb: number, crowdProb: number, divergence: number): 'BUY YES' | 'BUY NO' | 'HOLD' {
     if (divergence < 10) return 'HOLD';
-    
     if (aiProb > crowdProb) return 'BUY YES';
     return 'BUY NO';
   }
 
   private generateSummary(
-    label: string, 
-    aiProb: number, 
-    crowdProb: number, 
+    label: string,
+    aiProb: number,
+    crowdProb: number,
     divergence: number,
     momentum: string
   ): string {
     const aiPercent = (aiProb * 100).toFixed(1);
     const crowdPercent = (crowdProb * 100).toFixed(1);
-    
+
     let summary = `${label} sentiment detected. `;
     summary += `AI analysis: ${aiPercent}%, Market: ${crowdPercent}%. `;
-    
+
     if (divergence > 10) {
       summary += `Significant ${divergence.toFixed(0)}% divergence detected. `;
     }
-    
+
     summary += `Momentum: ${momentum}.`;
-    
     return summary;
   }
 
   private getFallbackSentiment(marketId: string, question: string, crowdProbability: number): SentimentResult {
-    // Simple fallback based on question keywords
     const text = question.toLowerCase();
     const bullishWords = ['increase', 'rise', 'gain', 'up', 'exceed', 'above', 'higher'];
     const bearishWords = ['decrease', 'fall', 'drop', 'down', 'below', 'lower'];
-    
+
     let score = 0;
     bullishWords.forEach(word => { if (text.includes(word)) score += 0.2; });
     bearishWords.forEach(word => { if (text.includes(word)) score -= 0.2; });
-    
+
     score = Math.max(-1, Math.min(1, score));
     const label = this.getSentimentLabel(score);
     const aiProbability = this.sentimentToProbability(score);
