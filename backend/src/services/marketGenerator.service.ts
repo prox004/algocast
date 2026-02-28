@@ -40,7 +40,7 @@ export class MarketGeneratorService {
     
     try {
       const response = await this.openai.chat.completions.create({
-        model: process.env.OPENROUTER_API_KEY ? 'meta-llama/llama-3.1-8b-instruct:free' : 'gpt-4',
+        model: process.env.OPENROUTER_API_KEY ? 'meta-llama/llama-3.1-8b-instruct' : 'gpt-4',
         messages: [
           {
             role: 'system',
@@ -78,13 +78,19 @@ No extra text. No markdown. No explanations outside JSON.`
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
-        throw new Error('No response from OpenAI');
+        throw new Error('No response from AI API');
       }
 
       const market = JSON.parse(content) as GeneratedMarket;
       return this.validateMarket(market);
     } catch (error) {
       console.error('Error generating market:', error);
+      // If it's an auth error, log helpful message
+      if (error instanceof Error && error.message.includes('401')) {
+        console.error('⚠️  OpenRouter API authentication failed. Please check your OPENROUTER_API_KEY in .env');
+      } else if (error instanceof Error && error.message.includes('404')) {
+        console.error('⚠️  AI model not found. Please check the model name is correct and available.');
+      }
       return this.generateFallbackMarket(request);
     }
   }

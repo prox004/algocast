@@ -49,15 +49,20 @@ export class ProbabilityService {
       // Combine AI estimate with factor-based calculation
       const combinedProbability = this.combineEstimates(aiProbability, factors);
       
-      return {
+      const estimate = {
         probability: combinedProbability,
         confidence: this.calculateConfidence(factors),
         reasoning: await this.generateReasoning(request, factors, combinedProbability),
         factors
       };
+      
+      console.log('[ProbabilityService] Estimate created:', { probability: estimate.probability, confidence: estimate.confidence });
+      return estimate;
     } catch (error) {
       console.error('Error estimating probability:', error);
-      return this.getFallbackEstimate(request);
+      const fallback = this.getFallbackEstimate(request);
+      console.log('[ProbabilityService] Using fallback estimate:', fallback);
+      return fallback;
     }
   }
 
@@ -152,7 +157,7 @@ Respond with only a number between 0 and 1 (e.g., 0.65 for 65% probability).
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: process.env.OPENROUTER_API_KEY ? 'meta-llama/llama-3.1-8b-instruct:free' : 'gpt-4',
+        model: process.env.OPENROUTER_API_KEY ? 'meta-llama/llama-3.1-8b-instruct' : 'gpt-4',
         messages: [
           {
             role: 'system',
@@ -173,11 +178,20 @@ Respond with only a number between 0 and 1 (e.g., 0.65 for 65% probability).
       return Math.max(0, Math.min(1, probability));
     } catch (error) {
       console.error('Error getting AI probability:', error);
+      // If it's an auth error, log helpful message
+      if (error instanceof Error && error.message.includes('401')) {
+        console.error('⚠️  OpenRouter API authentication failed. Please check your OPENROUTER_API_KEY in .env');
+      } else if (error instanceof Error && error.message.includes('404')) {
+        console.error('⚠️  AI model not found. Please check the model name is correct and available.');
+      }
       return 0.5; // Default neutral probability
     }
   }
 
   private combineEstimates(aiProbability: number, factors: any): number {
+    // Validate AI probability, use factor-only if invalid
+    const validAiProb = !isNaN(aiProbability) && isFinite(aiProbability) ? aiProbability : null;
+    
     // Weighted combination of AI estimate and factor-based calculation
     const factorProbability = (
       factors.trend_strength * 0.3 +
@@ -186,11 +200,17 @@ Respond with only a number between 0 and 1 (e.g., 0.65 for 65% probability).
       factors.time_sensitivity * 0.2
     );
     
+    // If AI probability is invalid, use only factors
+    if (validAiProb === null) {
+      console.log('[ProbabilityService] AI probability invalid, using factor-based estimate only');
+      return Math.max(0.05, Math.min(0.95, factorProbability));
+    }
+    
     // Weight AI estimate more heavily if confidence factors are strong
     const aiWeight = (factors.trend_strength + factors.historical_pattern) / 2;
     const factorWeight = 1 - aiWeight;
     
-    const combined = aiProbability * aiWeight + factorProbability * factorWeight;
+    const combined = validAiProb * aiWeight + factorProbability * factorWeight;
     return Math.max(0.05, Math.min(0.95, combined)); // Keep within reasonable bounds
   }
 

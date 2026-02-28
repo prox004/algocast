@@ -113,7 +113,26 @@ function deployMarketOnChain(question: string, closeTs: number): Promise<Deploym
 
     proc.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(`deploy.py exited with code ${code}. stderr: ${stderr.trim()}`));
+        const error = stderr.trim();
+        
+        // Check for common wallet balance error
+        if (error.includes('balance') && error.includes('below min')) {
+          const match = error.match(/account (\w+) balance (\d+) below min (\d+)/);
+          if (match) {
+            const [, address, current, needed] = match;
+            const currentAlgo = (parseInt(current) / 1_000_000).toFixed(3);
+            const neededAlgo = (parseInt(needed) / 1_000_000).toFixed(3);
+            console.error(`\n❌ Algorand Wallet Needs Funding:`);
+            console.error(`   Current: ${currentAlgo} ALGO`);
+            console.error(`   Needed:  ${neededAlgo} ALGO`);
+            console.error(`\n💡 Get free TestNet ALGO:`);
+            console.error(`   1. Visit: https://bank.testnet.algorand.network/`);
+            console.error(`   2. Enter: ${address}`);
+            console.error(`   3. Click "Dispense"\n`);
+          }
+        }
+        
+        reject(new Error(`deploy.py exited with code ${code}. stderr: ${error}`));
         return;
       }
 
@@ -125,7 +144,18 @@ function deployMarketOnChain(question: string, closeTs: number): Promise<Deploym
       }
 
       try {
-        const jsonStr = stdout.slice(summaryIdx + 'Deployment summary:'.length).trim();
+        // Extract JSON from the summary section
+        let jsonStr = stdout.slice(summaryIdx + 'Deployment summary:'.length).trim();
+        
+        // Find the JSON object boundaries (starts with { and ends with })
+        const jsonStart = jsonStr.indexOf('{');
+        const jsonEnd = jsonStr.lastIndexOf('}');
+        
+        if (jsonStart === -1 || jsonEnd === -1) {
+          throw new Error('No valid JSON object found in deploy.py output');
+        }
+        
+        jsonStr = jsonStr.slice(jsonStart, jsonEnd + 1);
         const data = JSON.parse(jsonStr) as DeploymentResult;
         resolve(data);
       } catch (parseErr) {
