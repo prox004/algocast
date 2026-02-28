@@ -9,8 +9,9 @@ const { requireAuth } = require('../middleware/auth');
 const db = require('../db');
 const { sendAlgo } = require('../algorand/asa');
 const { fundUserAccount } = require('../algorand/transactionBuilder');
-const { normalizeAddress } = require('../wallet/custodialWallet');
+const { normalizeAddress, exportMnemonic } = require('../wallet/custodialWallet');
 const { getAlgodClient } = require('../algorand/client');
+const bcrypt = require('bcryptjs');
 
 const router = express.Router();
 
@@ -27,8 +28,10 @@ router.get('/balance', requireAuth, async (req, res) => {
 
     // Always fetch directly from blockchain for truth
     const algod = getAlgodClient();
+    console.log(`[wallet/balance] Fetching on-chain balance for ${custodialAddress}...`);
     const accountInfo = await algod.accountInformation(custodialAddress).do();
     const onChainBalance = Number(accountInfo?.amount || 0);
+    console.log(`[wallet/balance] On-chain balance: ${onChainBalance} microAlgos (${onChainBalance / 1e6} ALGO)`);
 
     // Sync in DB
     const updatedUser = db.updateUser(user.id, { balance: onChainBalance });
@@ -165,6 +168,39 @@ router.post('/withdraw', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[withdraw]', err.message);
     return res.status(500).json({ error: 'Withdraw failed' });
+  }
+});
+
+// POST /wallet/export-mnemonic (protected)
+// SECURITY: Requires password verification before exporting mnemonic
+router.post('/export-mnemonic', requireAuth, async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required for security verification' });
+    }
+
+    const user = db.getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Verify password
+    const validPassword = await bcrypt.compare(password, user.hashed_password);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    // Export mnemonic (only after password verification)
+    const mnemonic = exportMnemonic(user.encrypted_private_key);
+
+    return res.json({
+      success: true,
+      mnemonic,
+      address: normalizeAddress(user.custodial_address),
+    });
+  } catch (err) {
+    console.error('[export-mnemonic]', err.message);
+    return res.status(500).json({ error: 'Failed to export wallet' });
   }
 });
 

@@ -299,7 +299,18 @@ async function fundUserAccount(params) {
     const KMD_TOKEN = process.env.KMD_TOKEN || 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     
     try {
-      const kmd = new algosdk.Kmd(KMD_TOKEN, KMD_URL);
+      // Parse KMD URL into server + port for algosdk.Kmd
+      let kmdServer, kmdPort;
+      try {
+        const u = new URL(KMD_URL);
+        kmdServer = `${u.protocol}//${u.hostname}`;
+        kmdPort = u.port ? Number(u.port) : '';
+      } catch {
+        kmdServer = KMD_URL;
+        kmdPort = '';
+      }
+      
+      const kmd = new algosdk.Kmd(KMD_TOKEN, kmdServer, kmdPort);
       
       // List wallets
       const wallets = await kmd.listWallets();

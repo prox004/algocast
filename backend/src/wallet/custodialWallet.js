@@ -100,9 +100,25 @@ function decryptPrivateKey(encryptedKey) {
   return Uint8Array.from(Buffer.from(privateKeyHex, 'hex'));
 }
 
+/**
+ * Export wallet as a 25-word mnemonic.
+ * SECURITY: Only call after user password verification!
+ *
+ * @param {string} encryptedKey "<iv_hex>:<ciphertext_hex>"
+ * @returns {string} 25-word mnemonic
+ */
+function exportMnemonic(encryptedKey) {
+  const sk = decryptPrivateKey(encryptedKey);
+  const mnemonic = algosdk.secretKeyToMnemonic(sk);
+  // Clear the secret key from memory immediately
+  sk.fill(0);
+  return mnemonic;
+}
+
 module.exports = {
   generateCustodialWallet,
   encryptPrivateKey,
   decryptPrivateKey,
+  exportMnemonic,
   normalizeAddress,
 };

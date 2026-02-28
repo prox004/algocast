@@ -166,6 +166,13 @@ export async function withdraw(to_address: string, amount: number): Promise<{ su
   });
 }
 
+export async function exportWalletMnemonic(password: string): Promise<{ success: boolean; mnemonic: string; address: string }> {
+  return request('/wallet/export-mnemonic', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  });
+}
+
 // ── Markets ──────────────────────────────────────────────────────────────────
 
 export async function getMarkets(): Promise<Market[]> {
