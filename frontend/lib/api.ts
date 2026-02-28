@@ -298,6 +298,10 @@ export async function getAIAnalysis(market_id: string): Promise<AIAnalysis> {
   return request(`/ai/analysis/${market_id}`);
 }
 
+export async function getSentiment(market_id: string): Promise<any> {
+  return request(`/ai/sentiment/${market_id}`);
+}
+
 export async function getSentimentAnalysis(market_id: string): Promise<SentimentResult> {
   return request(`/ai/sentiment/${market_id}`);
 }
