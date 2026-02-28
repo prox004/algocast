@@ -4,6 +4,7 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
+import session from 'express-session';
 import aiRoutes from './routes/ai';
 import dbMarketsRoutes from './routes/markets'; // New TypeScript DB routes
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
@@ -46,6 +47,25 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Session middleware (required for passport)
+app.use(session({
+  secret: process.env.SESSION_SECRET || process.env.JWT_SECRET || 'fallback-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: process.env.NODE_ENV === 'production' }
+}));
+
+// Initialize Passport (if configured)
+try {
+  const passport = require('./config/passport').default;
+  app.use(passport.initialize());
+  app.use(passport.session());
+  console.log('✅ Passport OAuth initialized');
+} catch (err) {
+  console.warn('⚠️  Passport not configured - OAuth routes disabled');
+  console.warn('   Error:', err instanceof Error ? err.message : String(err));
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
