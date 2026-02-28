@@ -44,28 +44,58 @@ export class MarketGeneratorService {
         messages: [
           {
             role: 'system',
-            content: `You are a prediction market generator. Create binary (YES/NO) markets from trending topics.
+            content: `You are a Polymarket-style prediction market generator. Your ONLY job is to convert tweet content into BINARY YES/NO prediction questions.
 
-STRICT RULES:
-- Question must be binary (YES/NO)
-- Include measurable condition
-- Include exact UTC expiry (24-72 hours from now)
-- Include clearly defined data source
-- Must be objectively resolvable
-- No vague wording
+⚠️  DO NOT JUST COPY THE TWEET TEXT - YOU MUST TRANSFORM IT INTO A PREDICTION QUESTION! ⚠️
 
-Return ONLY valid JSON in this exact schema:
+STEP-BY-STEP PROCESS:
+1. Read the tweet content
+2. Identify the core claim or topic (price movement, event, announcement, etc.)
+3. Convert it into a specific, measurable, future prediction
+4. Make it answerable with YES or NO
+5. Add specific numbers, prices, or verifiable criteria
+6. Set appropriate timeframe
+
+GOOD EXAMPLES:
+❌ BAD: "@user: Solana ecosystem growing"
+✅ GOOD: "Will Solana (SOL) price reach $200 within 24 hours?"
+
+❌ BAD: "@user: ETH merge successful"  
+✅ GOOD: "Will Ethereum maintain above $2,000 for next 48 hours post-merge?"
+
+❌ BAD: "@user: New crypto regulation coming"
+✅ GOOD: "Will SEC announce new crypto regulation within 7 days?"
+
+❌ BAD: "@user: BTC volatility high"
+✅ GOOD: "Will Bitcoin (BTC) price move more than 5% in next 12 hours?"
+
+TRANSFORMATION PATTERNS:
+- Price mention → "Will [asset] reach/maintain $[price] by [time]?"
+- Event mention → "Will [event] happen/be announced by [date]?"
+- Trend claim → "Will [metric] increase/decrease by [amount] within [timeframe]?"
+- Opinion → "Will [prediction] be confirmed by [verifiable source] by [date]?"
+
+MANDATORY RULES:
+✅ Start with "Will..."
+✅ Include specific measurable criteria (numbers, dates, prices)
+✅ Be verifiable with real data sources
+✅ Set realistic expiry (1-48 hours based on urgency)
+✅ Make it binary (YES/NO only)
+
+❌ NEVER just copy the tweet text
+❌ NEVER make vague predictions
+❌ NEVER use opinions as questions
+
+Return ONLY valid JSON:
 {
-  "question": "",
-  "data_source": "",
-  "expiry": "",
-  "ai_probability": 0.0,
-  "confidence": "",
-  "reasoning": "",
-  "suggested_action": ""
-}
-
-No extra text. No markdown. No explanations outside JSON.`
+  "question": "Will [specific prediction] by [time]?",
+  "data_source": "API or source to verify",
+  "expiry": "ISO timestamp",
+  "ai_probability": 0.5,
+  "confidence": "high/medium/low",
+  "reasoning": "Why this probability",
+  "suggested_action": "buy/sell/hold"
+}`
           },
           {
             role: 'user',
@@ -104,30 +134,33 @@ No extra text. No markdown. No explanations outside JSON.`
     const in48Hours = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
     return `
-Tweet/Trend Content: ${request.trend}
+🎯 TWEET TO TRANSFORM:
+"${request.trend}"
+
 Category: ${request.category}
-Engagement: ${request.volume} interactions
 Current Time: ${now.toISOString()}
 
-Create a binary prediction market based on this tweet/trend. 
+⚠️  YOUR TASK: Turn this tweet into a PREDICTION QUESTION (not a statement!)
 
-CRITICAL REQUIREMENTS:
-1. Question must be directly about the tweet content (e.g., if Elon tweets about Tesla stock, ask "Will Tesla stock reach $X within Y hours?")
-2. Choose appropriate duration based on tweet urgency:
-   - Breaking news/price predictions: 1-6 hours
-   - Announcements/events: 6-24 hours
-   - Long-term predictions: 24-48 hours
-3. Use measurable criteria (stock prices, official announcements, verified sources)
-4. Make expiry time realistic for the prediction type
+TRANSFORMATION STEPS:
+1. What is the core claim? (e.g., "Solana growing" → predict price movement)
+2. What's measurable? (price, event date, announcement, metric)
+3. What's the timeframe? (1-48 hours based on urgency)
+4. Turn into "Will [something specific] happen by [exact time]?"
 
-Example expiry options:
-- Very Short (1h):  ${in1Hour.toISOString()}
-- Short (6h):      ${in6Hours.toISOString()}
-- Medium (12h):    ${in12Hours.toISOString()}
-- Standard (24h):  ${in24Hours.toISOString()}
-- Extended (48h):  ${in48Hours.toISOString()}
+DURATION GUIDE:
+- Breaking news/prices → 1-6 hours (${in1Hour.toISOString()} to ${in6Hours.toISOString()})
+- Events/announcements → 6-24 hours (${in6Hours.toISOString()} to ${in24Hours.toISOString()})  
+- Long-term trends → 24-48 hours (${in24Hours.toISOString()} to ${in48Hours.toISOString()})
 
-Generate the market now.`;
+⚠️  CRITICAL: Your "question" field MUST be a prediction, NOT the tweet text!
+
+Example:
+Tweet: "@user: Ethereum merge successful"
+❌ WRONG: "Ethereum merge successful"  
+✅ RIGHT: "Will Ethereum (ETH) maintain above $2,000 for 48 hours after merge completion?"
+
+NOW GENERATE THE MARKET JSON:`;
   }
 
   private validateMarket(market: GeneratedMarket): GeneratedMarket {
@@ -149,19 +182,31 @@ Generate the market now.`;
       market.expiry = futureExpiry.toISOString();
     }
 
-    // Ensure question is binary
+    // Ensure question is binary and starts with interrogative
     if (!this.isBinaryQuestion(market.question)) {
-      market.question = `Will ${market.question}?`;
+      // Force it to be a question if it's not
+      if (!market.question.startsWith('Will')) {
+        market.question = `Will ${market.question}`;
+      }
+      if (!market.question.endsWith('?')) {
+        market.question = `${market.question}?`;
+      }
     }
 
     return market;
   }
 
   private isBinaryQuestion(question: string): boolean {
-    const binaryIndicators = ['will', 'does', 'is', 'can', 'should', 'has'];
-    const lowerQuestion = question.toLowerCase();
-    return binaryIndicators.some(indicator => lowerQuestion.startsWith(indicator)) ||
-           question.endsWith('?');
+    const binaryIndicators = ['will', 'does', 'is', 'can', 'should', 'has', 'did', 'could', 'would'];
+    const lowerQuestion = question.toLowerCase().trim();
+    
+    // Must start with a question word and end with ?
+    const startsCorrectly = binaryIndicators.some(indicator => 
+      lowerQuestion.startsWith(indicator + ' ')
+    );
+    const endsCorrectly = question.trim().endsWith('?');
+    
+    return startsCorrectly && endsCorrectly;
   }
 
   private generateFallbackMarket(request: MarketRequest): GeneratedMarket {

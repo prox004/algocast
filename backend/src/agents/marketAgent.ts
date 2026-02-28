@@ -147,8 +147,8 @@ export class MarketAgent {
       { check: market.question && market.question.length > 10, message: 'Question too short' },
       { check: market.data_source && market.data_source.length > 5, message: 'Data source missing' },
       { check: new Date(market.expiry) > new Date(), message: 'Expiry in past' },
-      { check: probability && typeof probability.probability === 'number' && probability.probability >= 0 && probability.probability <= 1, message: 'Invalid probability' },
-      { check: !probability || probability.confidence !== 'low', message: 'Low confidence estimate' }
+      { check: probability && typeof probability.probability === 'number' && probability.probability >= 0 && probability.probability <= 1, message: 'Invalid probability' }
+      // Removed low confidence check for hackathon mode - all markets are accepted
     ];
 
     const failedValidations = validations.filter(v => !v.check);
