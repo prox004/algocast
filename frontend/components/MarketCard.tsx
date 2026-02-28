@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { type Market, formatAlgo, formatProb, isExpired } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { type Market, formatAlgo, formatProb, isExpired, getMarketCurrentPrice, type CurrentPrice } from '@/lib/api';
 
 interface Props {
   market: Market;
@@ -11,6 +12,7 @@ export default function MarketCard({ market }: Props) {
   const expired = isExpired(market);
   const prob = market.market_probability ?? 0;
   const category = market.category || 'general';
+  const [currentPrice, setCurrentPrice] = useState<CurrentPrice | null>(null);
 
   /** Map category key to a display colour */
   const catColors: Record<string, string> = {
@@ -27,6 +29,14 @@ export default function MarketCard({ market }: Props) {
     earnings: 'bg-violet-900/50 text-violet-300',
   };
   const catColor = catColors[category] || 'bg-gray-800/50 text-gray-400';
+
+  useEffect(() => {
+    if (market.ticker) {
+      getMarketCurrentPrice(market.id)
+        .then((res) => setCurrentPrice(res.currentPrice))
+        .catch(() => {}); // Silently fail if price fetch fails
+    }
+  }, [market.id, market.ticker]);
 
   return (
     <Link href={`/market/${market.id}`}>
@@ -58,6 +68,30 @@ export default function MarketCard({ market }: Props) {
 
         {/* Question */}
         <p className="font-semibold text-sm leading-snug mb-4 flex-1">{market.question}</p>
+
+        {/* Ticker & Price display */}
+        {market.ticker && currentPrice && (
+          <div className="mb-3 p-2 bg-gray-800/40 rounded border border-gray-700/50">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs text-gray-400">Ticker: </span>
+                <span className="text-sm font-bold text-white">{currentPrice.ticker}</span>
+              </div>
+              <div className="text-right">
+                <p className="text-base font-bold text-emerald-400">${currentPrice.price.toFixed(2)}</p>
+                {currentPrice.priceChangePercent24h !== undefined && (
+                  <p
+                    className={`text-xs font-semibold ${
+                      currentPrice.priceChangePercent24h >= 0 ? 'text-emerald-400' : 'text-red-400'
+                    }`}
+                  >
+                    {currentPrice.priceChangePercent24h >= 0 ? '+' : ''}{currentPrice.priceChangePercent24h.toFixed(2)}%
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Probability bar */}
         <div className="mb-3">

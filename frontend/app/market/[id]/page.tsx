@@ -10,7 +10,9 @@ import {
   formatAlgo,
   formatProb,
   isExpired,
+  getMarketCurrentPrice,
   type Market,
+  type CurrentPrice,
 } from '@/lib/api';
 import BuyPanel from '@/components/BuyPanel';
 import AIInsightPanel from '@/components/AIInsightPanel';
@@ -20,6 +22,7 @@ export default function MarketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [market, setMarket] = useState<Market | null>(null);
+  const [currentPrice, setCurrentPrice] = useState<CurrentPrice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [claimMsg, setClaimMsg] = useState('');
@@ -36,7 +39,15 @@ export default function MarketDetailPage() {
   useEffect(() => {
     if (!id) return;
     getMarket(id)
-      .then(setMarket)
+      .then((m) => {
+        setMarket(m);
+        // Fetch current price if market has a ticker
+        if (m.ticker) {
+          getMarketCurrentPrice(id)
+            .then((res) => setCurrentPrice(res.currentPrice))
+            .catch(() => {}); // Silently fail if price fetch fails
+        }
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [id]);
@@ -96,6 +107,26 @@ export default function MarketDetailPage() {
             {market.resolved ? 'RESOLVED' : expired ? 'EXPIRED' : 'LIVE'}
           </span>
         </div>
+
+        {/* Ticker & Real-time Price Display */}
+        {market.ticker && currentPrice && (
+          <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/20 to-blue-900/20 border border-cyan-700/30 rounded-lg">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs text-gray-400 mb-1">TICKER</p>
+                <p className="text-lg font-bold text-white">{currentPrice.ticker} {market.asset_type && <span className="text-xs text-gray-400 ml-1">({market.asset_type.toUpperCase()})</span>}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-emerald-400">${currentPrice.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                {currentPrice.priceChangePercent24h !== undefined && (
+                  <p className={`text-sm font-semibold ${currentPrice.priceChangePercent24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {currentPrice.priceChangePercent24h >= 0 ? '+' : ''}{currentPrice.priceChangePercent24h.toFixed(2)}% (24h)
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Big YES / NO probability display */}
         <div className="flex gap-3 mb-4">
