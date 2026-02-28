@@ -17,6 +17,26 @@ const crypto = require('crypto');
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16; // bytes
 
+function normalizeAddress(addressLike) {
+  if (!addressLike) return '';
+  if (typeof addressLike === 'string') return addressLike;
+
+  if (addressLike.addr) {
+    return normalizeAddress(addressLike.addr);
+  }
+
+  if (addressLike.publicKey instanceof Uint8Array) {
+    return algosdk.encodeAddress(addressLike.publicKey);
+  }
+
+  if (typeof addressLike.toString === 'function') {
+    const value = addressLike.toString();
+    if (value && value !== '[object Object]') return value;
+  }
+
+  throw new Error('Invalid Algorand address value');
+}
+
 /**
  * Derive a 32-byte key from the env secret.
  */
@@ -39,7 +59,7 @@ function generateCustodialWallet() {
   const privateKeyHex = Buffer.from(account.sk).toString('hex');
   const encryptedKey = encryptPrivateKey(privateKeyHex);
   return {
-    address: account.addr,
+    address: normalizeAddress(account.addr),
     encryptedKey,
   };
 }
@@ -84,4 +104,5 @@ module.exports = {
   generateCustodialWallet,
   encryptPrivateKey,
   decryptPrivateKey,
+  normalizeAddress,
 };

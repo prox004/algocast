@@ -59,12 +59,24 @@ async function request<T>(
 
   if (!res.ok) {
     // handles both { error: 'string' } and { error: { message: 'string' } }
-    const msg =
-      typeof data?.error === 'string'
-        ? data.error
-        : data?.error?.message ?? data?.message ?? 'Request failed';
+    let msg = 'Request failed';
+    if (data?.error) {
+      if (typeof data.error === 'string') {
+        msg = data.error;
+      } else if (typeof data.error === 'object' && data.error.message) {
+        msg = typeof data.error.message === 'string' ? data.error.message : 'Request failed';
+      }
+    } else if (data?.message && typeof data.message === 'string') {
+      msg = data.message;
+    }
     throw new Error(msg);
   }
+
+  // Validate that data is an object (not null, array, or primitive)
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    throw new Error('Invalid response from server');
+  }
+
   return data as T;
 }
 
@@ -134,7 +146,13 @@ export async function getWalletBalance(): Promise<{ balance: number; custodial_a
   return request('/wallet/balance');
 }
 
-export async function deposit(amount: number): Promise<{ success: boolean; balance: number }> {
+export async function syncWalletBalance(): Promise<{ success: boolean; balance: number; custodial_address: string }> {
+  return request('/wallet/sync-balance', {
+    method: 'POST',
+  });
+}
+
+export async function deposit(amount: number): Promise<{ success: boolean; txid: string; balance: number }> {
   return request('/wallet/deposit', {
     method: 'POST',
     body: JSON.stringify({ amount }),

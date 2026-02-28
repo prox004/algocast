@@ -13,7 +13,21 @@ export default function NavBar() {
 
   useEffect(() => {
     if (getToken()) {
-      getMe().then(setUser).catch(() => setUser(null));
+      getMe()
+        .then((data) => {
+          // Explicit validation
+          if (
+            typeof data === 'object' &&
+            data !== null &&
+            typeof data.id === 'string' &&
+            typeof data.email === 'string'
+          ) {
+            setUser(data);
+          } else {
+            setUser(null);
+          }
+        })
+        .catch(() => setUser(null));
     } else {
       setUser(null);
     }

@@ -21,6 +21,7 @@
 const algosdk = require('algosdk');
 const path = require('path');
 const { decryptPrivateKey } = require('../wallet/custodialWallet');
+const { normalizeAddress } = require('../wallet/custodialWallet');
 const { getAlgodClient } = require('./client');
 
 // ── ABI contract (lazy-loaded from compiled JSON) ──────────────────────────────
@@ -268,6 +269,53 @@ function isContractReady() {
   return getAbiContract() !== null;
 }
 
+// ── Deposit (Fund User Account) ────────────────────────────────────────────────
+
+/**
+ * Fund a user's custodial address using the backend's deployer wallet.
+ * This is the on-chain deposit mechanism.
+ *
+ * @param {{
+ *   toAddress: string,
+ *   amountMicroAlgos: number,
+ * }} params
+ * @returns {Promise<string>} confirmed txid
+ */
+async function fundUserAccount(params) {
+  const { toAddress, amountMicroAlgos } = params;
+  if (amountMicroAlgos <= 0) throw new Error('amountMicroAlgos must be > 0');
+  if (!toAddress) throw new Error('toAddress is required');
+
+  const mnemonic = process.env.DEPLOYER_MNEMONIC;
+  if (!mnemonic) throw new Error('DEPLOYER_MNEMONIC not set in .env');
+
+  // Recover deployer account from mnemonic
+  const account = algosdk.mnemonicToSecretKey(mnemonic);
+  const fromAddress = normalizeAddress(account.addr);
+  const recipientAddress = normalizeAddress(toAddress);
+
+  const algod = getAlgodClient();
+  const sp    = await algod.getTransactionParams().do();
+  sp.fee      = 1000;
+  sp.flatFee  = true;
+
+  const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    from:            fromAddress,
+    to:              recipientAddress,
+    amount:          amountMicroAlgos,
+    suggestedParams: sp,
+  });
+
+  const signed = txn.signTxn(account.sk);
+  // Clear the secret key from memory
+  const sk = new Uint8Array(account.sk);
+  sk.fill(0);
+
+  // Broadcast and wait for confirmation
+  const txid = await broadcast(signed);
+  return txid;
+}
+
 module.exports = {
   broadcast,
   signBuyGroup,
@@ -276,4 +324,5 @@ module.exports = {
   signAsaOptIn,
   readMarketState,
   isContractReady,
+  fundUserAccount,
 };

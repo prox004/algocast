@@ -7,6 +7,11 @@ import cors from 'cors';
 import aiRoutes from './routes/ai';
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
 
+// JS routes (CommonJS)
+const authRoutes = require('./routes/auth');
+const walletRoutes = require('./routes/wallet');
+const marketsRoutes = require('./routes/markets');
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -33,6 +38,9 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+app.use('/auth', authRoutes);
+app.use('/wallet', walletRoutes);
+app.use('/markets', marketsRoutes);
 app.use('/ai', aiRoutes);
 
 // 404 handler

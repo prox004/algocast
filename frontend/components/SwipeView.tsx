@@ -54,13 +54,22 @@ export default function SwipeView({ markets }: Props) {
 
   function onTouchEnd() {
     setIsDragging(false);
+    
+    if (!getToken()) {
+      setDragX(0);
+      router.push('/login');
+      return;
+    }
+
     if (Math.abs(dragX) >= SWIPE_THRESHOLD) {
-      if (!getToken()) {
-        setDragX(0);
-        router.push('/login');
-        return;
+      if (dragX > 0) {
+        // Right swipe → auto-open YES popup
+        setPendingSide('YES');
+        setAmount(0.1);
+      } else {
+        // Left swipe → auto-skip to next market
+        skipCard();
       }
-      setPendingSide(dragX > 0 ? 'YES' : 'NO');
     }
     setDragX(0);
   }
@@ -129,11 +138,11 @@ export default function SwipeView({ markets }: Props) {
         {/* NO overlay */}
         {dragX < 0 && (
           <div
-            className="absolute inset-0 bg-red-500/15 flex items-center justify-end pr-6 z-10 pointer-events-none"
+            className="absolute inset-0 bg-gray-600/15 flex items-center justify-end pr-6 z-10 pointer-events-none"
             style={{ opacity: overlayOpacity }}
           >
-            <span className="border-4 border-red-400 text-red-400 text-3xl font-black px-3 py-1 rounded-xl rotate-12">
-              NO
+            <span className="border-4 border-gray-400 text-gray-400 text-3xl font-black px-3 py-1 rounded-xl rotate-12">
+              SKIP
             </span>
           </div>
         )}
@@ -175,11 +184,11 @@ export default function SwipeView({ markets }: Props) {
 
           {/* Swipe hint */}
           <div className="flex justify-between items-center text-sm">
-            <span className="text-red-500/60 font-semibold">← NO</span>
+            <span className="text-gray-500/80 font-semibold">← Skip</span>
             <button onClick={skipCard} className="text-xs text-gray-700 underline underline-offset-2">
-              skip
+              manual skip
             </button>
-            <span className="text-emerald-500/60 font-semibold">YES →</span>
+            <span className="text-emerald-500/80 font-semibold">Buy YES →</span>
           </div>
         </div>
       </div>

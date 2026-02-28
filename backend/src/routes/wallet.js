@@ -1,6 +1,6 @@
 /**
  * routes/wallet.js
- * POST /wallet/deposit   — credit balance (mock deposit for hackathon)
+ * POST /wallet/deposit   — on-chain ALGO transfer from deployer wallet
  * POST /wallet/withdraw  — real on-chain ALGO transfer
  */
 
@@ -8,6 +8,9 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const db = require('../db');
 const { sendAlgo } = require('../algorand/asa');
+const { fundUserAccount } = require('../algorand/transactionBuilder');
+const { normalizeAddress } = require('../wallet/custodialWallet');
+const { getAlgodClient } = require('../algorand/client');
 
 const router = express.Router();
 
@@ -15,15 +18,47 @@ const router = express.Router();
 router.get('/balance', requireAuth, (req, res) => {
   const user = db.getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  return res.json({
-    balance: user.balance,
-    custodial_address: user.custodial_address,
-    email: user.email,
-  });
+  
+  // Explicitly construct response with only expected fields
+  const response = {
+    balance: Number(user.balance) || 0,
+    custodial_address: normalizeAddress(user.custodial_address),
+    email: String(user.email || ''),
+  };
+  
+  return res.json(response);
+});
+
+// POST /wallet/sync-balance (protected)
+router.post('/sync-balance', requireAuth, async (req, res) => {
+  try {
+    const user = db.getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const custodialAddress = normalizeAddress(user.custodial_address);
+    if (!custodialAddress) {
+      return res.status(400).json({ error: 'User custodial address missing' });
+    }
+
+    const algod = getAlgodClient();
+    const accountInfo = await algod.accountInformation(custodialAddress).do();
+    const onChainBalance = Number(accountInfo?.amount || 0);
+
+    const updatedUser = db.updateUser(user.id, { balance: onChainBalance });
+
+    return res.json({
+      success: true,
+      balance: Number(updatedUser.balance) || 0,
+      custodial_address: custodialAddress,
+    });
+  } catch (err) {
+    console.error('[sync-balance]', err.message);
+    return res.status(500).json({ error: 'Failed to sync on-chain balance' });
+  }
 });
 
 // POST /wallet/deposit (protected)
-router.post('/deposit', requireAuth, (req, res) => {
+router.post('/deposit', requireAuth, async (req, res) => {
   try {
     const { amount } = req.body;
     const microAlgos = parseInt(amount, 10);
@@ -33,10 +68,28 @@ router.post('/deposit', requireAuth, (req, res) => {
 
     const user = db.getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
+    const custodialAddress = normalizeAddress(user.custodial_address);
 
-    // Hackathon: direct balance credit (no real on-chain deposit required)
+    // On-chain deposit: send real ALGO from deployer to user's custodial address
+    let txid;
+    try {
+      txid = await fundUserAccount({
+        toAddress: custodialAddress,
+        amountMicroAlgos: microAlgos,
+      });
+    } catch (txnErr) {
+      console.error('[deposit on-chain]', txnErr.message);
+      return res.status(502).json({ error: `Blockchain deposit failed: ${txnErr.message}` });
+    }
+
+    // After successful on-chain transfer, update the user's balance in the DB
     const updatedUser = db.updateUser(user.id, { balance: user.balance + microAlgos });
-    return res.json({ success: true, balance: updatedUser.balance });
+    
+    return res.json({
+      success: true,
+      txid: String(txid || ''),
+      balance: Number(updatedUser.balance) || 0,
+    });
   } catch (err) {
     console.error('[deposit]', err.message);
     return res.status(500).json({ error: 'Deposit failed' });
@@ -56,6 +109,7 @@ router.post('/withdraw', requireAuth, async (req, res) => {
 
     const user = db.getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
+    const fromAddress = normalizeAddress(user.custodial_address);
     if (user.balance < microAlgos) {
       return res.status(400).json({ error: 'Insufficient balance' });
     }
@@ -67,7 +121,7 @@ router.post('/withdraw', requireAuth, async (req, res) => {
     try {
       txid = await sendAlgo(
         user.encrypted_private_key,
-        user.custodial_address,
+        fromAddress,
         to_address,
         microAlgos,
       );
@@ -79,7 +133,11 @@ router.post('/withdraw', requireAuth, async (req, res) => {
     }
 
     const updatedUser = db.getUserById(user.id);
-    return res.json({ success: true, txid, balance: updatedUser.balance });
+    return res.json({
+      success: true,
+      txid: String(txid || ''),
+      balance: Number(updatedUser.balance) || 0,
+    });
   } catch (err) {
     console.error('[withdraw]', err.message);
     return res.status(500).json({ error: 'Withdraw failed' });

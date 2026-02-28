@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { generateCustodialWallet } = require('../wallet/custodialWallet');
+const { normalizeAddress } = require('../wallet/custodialWallet');
 
 const router = express.Router();
 
@@ -21,10 +22,10 @@ function signToken(user) {
 
 function publicUser(user) {
   return {
-    id: user.id,
-    email: user.email,
-    custodial_address: user.custodial_address,
-    balance: user.balance,
+    id: String(user.id || ''),
+    email: String(user.email || ''),
+    custodial_address: normalizeAddress(user.custodial_address),
+    balance: Number(user.balance) || 0,
   };
 }
 
@@ -52,7 +53,10 @@ router.post('/register', async (req, res) => {
     });
 
     const token = signToken(user);
-    return res.status(201).json({ token, user: publicUser(user) });
+    return res.status(201).json({
+      token: String(token || ''),
+      user: publicUser(user),
+    });
   } catch (err) {
     console.error('[register]', err.message);
     return res.status(500).json({ error: 'Registration failed' });
@@ -96,7 +100,10 @@ router.post('/login', async (req, res) => {
     }
 
     const token = signToken(user);
-    return res.json({ token, user: publicUser(user) });
+    return res.json({
+      token: String(token || ''),
+      user: publicUser(user),
+    });
   } catch (err) {
     console.error('[login]', err.message);
     return res.status(500).json({ error: 'Login failed' });
