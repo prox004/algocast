@@ -7,7 +7,7 @@ import os
 
 # ── Network Selection ──────────────────────────────────────────────────────────
 
-ALGOD_NETWORK = os.getenv("ALGOD_NETWORK", "testnet")  # "local" or "testnet"
+ALGOD_NETWORK = os.getenv("ALGOD_NETWORK", "local")  # "local" or "testnet"
 
 # LocalNet (AlgoKit) configuration
 if ALGOD_NETWORK == "local":

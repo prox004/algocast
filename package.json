@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "algokit": "^0.0.1",
     "axios": "^1.13.6"
   }
 }
