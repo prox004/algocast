@@ -303,7 +303,43 @@ export async function getSentiment(market_id: string): Promise<any> {
 }
 
 export async function getSentimentAnalysis(market_id: string): Promise<SentimentResult> {
-  return request(`/ai/sentiment/${market_id}`);
+  const raw = await request<any>(`/ai/sentiment/${market_id}`);
+  
+  // Transform backend response to frontend SentimentResult interface
+  const labelMap: Record<string, 'Bullish' | 'Bearish' | 'Neutral'> = {
+    'BULLISH': 'Bullish',
+    'BEARISH': 'Bearish',
+    'NEUTRAL': 'Neutral',
+  };
+  
+  const confidenceMap: Record<number, 'High' | 'Medium' | 'Low'> = {};
+  const getConfidence = (c: number): 'High' | 'Medium' | 'Low' => 
+    c >= 0.7 ? 'High' : c >= 0.4 ? 'Medium' : 'Low';
+  
+  const momentumMap: Record<string, SentimentResult['momentum_indicator']> = {
+    'STRONG_UP': 'Strong Upward Momentum',
+    'UP': 'Upward Momentum',
+    'STABLE': 'Stable',
+    'DOWN': 'Downward Momentum',
+    'STRONG_DOWN': 'Strong Downward Momentum',
+  };
+  
+  return {
+    success: raw.success ?? true,
+    market_id: raw.market_id,
+    news_articles_analyzed: raw.sources?.news_count ?? 0,
+    sentiment_score: raw.sentiment?.score ?? 0,
+    sentiment_label: labelMap[raw.sentiment?.label?.toUpperCase()] ?? 'Neutral',
+    ai_probability_adjustment: (raw.analysis?.ai_probability ?? 0.5) - (raw.analysis?.crowd_probability ?? 0.5),
+    confidence: getConfidence(raw.sentiment?.confidence ?? 0.5),
+    momentum_indicator: momentumMap[raw.sentiment?.momentum?.toUpperCase()] ?? 'Stable',
+    explanation: raw.summary ?? 'No analysis available.',
+    articles: raw.articles ?? [],
+    ai_probability: raw.analysis?.ai_probability ?? 0.5,
+    market_probability: raw.analysis?.crowd_probability ?? 0.5,
+    mispricing_percent: raw.analysis?.divergence ?? 0,
+    fetched_at: new Date(raw.timestamp ?? Date.now()).toISOString(),
+  };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
