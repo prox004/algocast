@@ -25,6 +25,11 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+export function logout() {
+  clearToken();
+  if (typeof window !== 'undefined') window.location.href = '/';
+}
+
 // ── Fetch wrapper ────────────────────────────────────────────────────────────
 
 async function request<T>(
@@ -119,7 +124,15 @@ export async function login(email: string, password: string): Promise<{ token: s
   });
 }
 
+export async function getMe(): Promise<User> {
+  return request('/auth/me');
+}
+
 // ── Wallet ───────────────────────────────────────────────────────────────────
+
+export async function getWalletBalance(): Promise<{ balance: number; custodial_address: string; email: string }> {
+  return request('/wallet/balance');
+}
 
 export async function deposit(amount: number): Promise<{ success: boolean; balance: number }> {
   return request('/wallet/deposit', {

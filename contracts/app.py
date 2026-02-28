@@ -75,18 +75,20 @@ router = pt.Router(
 
 # ── create_market ─────────────────────────────────────────────────────────────
 
-@router.method(no_op=pt.CallConfig.CREATE)
+@router.method
 def create_market(
     question: pt.abi.String,
     close_ts: pt.abi.Uint64,
 ) -> pt.Expr:
     """
-    Called once on deployment.  Creates YES and NO ASAs with the contract
-    as manager + clawback (enables burn during claim).
+    Called once after deployment to initialise state and mint YES/NO ASAs.
+    Protected by a close_ts == 0 guard so it can never be called twice.
     """
     app_addr = pt.Global.current_application_address()
 
     return pt.Seq(
+        # Guard: can only be called once (close_ts starts at 0)
+        pt.Assert(pt.App.globalGet(KEY_CLOSE_TS) == pt.Int(0), comment="already initialized"),
         # Validate inputs
         pt.Assert(close_ts.get() > pt.Global.latest_timestamp(), comment="close_ts must be future"),
         pt.Assert(pt.Len(question.get()) > pt.Int(0), comment="question cannot be empty"),

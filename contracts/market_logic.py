@@ -101,7 +101,6 @@ def handle_buy_yes(payment_amount: pt.Expr, buyer: pt.Expr) -> pt.Expr:
             receiver=buyer,
             amount=tokens.load(),
         ),
-        pt.Int(1),   # return truthy
     )
 
 
@@ -121,7 +120,6 @@ def handle_buy_no(payment_amount: pt.Expr, buyer: pt.Expr) -> pt.Expr:
             receiver=buyer,
             amount=tokens.load(),
         ),
-        pt.Int(1),
     )
 
 
@@ -147,7 +145,6 @@ def handle_resolve(outcome: pt.Expr, caller: pt.Expr) -> pt.Expr:
         ),
         pt.App.globalPut(KEY_RESOLVED, pt.Int(1)),
         pt.App.globalPut(KEY_OUTCOME, outcome),
-        pt.Int(1),
     )
 
 
@@ -191,5 +188,4 @@ def handle_claim(claimer: pt.Expr) -> pt.Expr:
             receiver=claimer,
             amount=token_bal.load(),
         ),
-        pt.Int(1),
     )

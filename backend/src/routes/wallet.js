@@ -11,6 +11,17 @@ const { sendAlgo } = require('../algorand/asa');
 
 const router = express.Router();
 
+// GET /wallet/balance (protected)
+router.get('/balance', requireAuth, (req, res) => {
+  const user = db.getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  return res.json({
+    balance: user.balance,
+    custodial_address: user.custodial_address,
+    email: user.email,
+  });
+});
+
 // POST /wallet/deposit (protected)
 router.post('/deposit', requireAuth, (req, res) => {
   try {

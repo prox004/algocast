@@ -23,6 +23,15 @@ import time
 import os
 import sys
 
+# ── Load .env BEFORE importing config (so os.getenv picks up values) ──────────
+_here = os.path.dirname(os.path.abspath(__file__))
+_env_path = os.path.join(_here, '..', 'backend', '.env')
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_env_path)
+except ImportError:
+    pass  # python-dotenv optional; env vars can be set manually
+
 # Allow running from repo root or contracts/
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -75,9 +84,10 @@ def deploy_market(question: str, close_ts: int) -> dict:
     """
     Full deployment flow:
       1. Compile contract
-      2. Deploy app (ApplicationCreate)
-      3. Fund app with min-balance
-      4. Call create_market() ABI method
+      2. Bare ApplicationCreate (no method call)
+      3. Fund app with min-balance (so inner txns in step 4 can pay fees)
+      4. Call create_market() as a regular NoOp ABI call
+      5. Read YES/NO ASA IDs from global state
     Returns: { app_id, app_address, yes_asa_id, no_asa_id }
     """
     if not DEPLOYER_MNEMONIC:
@@ -89,7 +99,7 @@ def deploy_market(question: str, close_ts: int) -> dict:
     sp.flat_fee = True
 
     # Recover deployer key
-    deployer_pk  = mnemonic.to_private_key(DEPLOYER_MNEMONIC)
+    deployer_pk   = mnemonic.to_private_key(DEPLOYER_MNEMONIC)
     deployer_addr = account.address_from_private_key(deployer_pk)
     print(f"[i] Deployer : {deployer_addr}")
 
@@ -107,8 +117,9 @@ def deploy_market(question: str, close_ts: int) -> dict:
     approval_bytes = compile_teal(algod, approval_src)
     clear_bytes    = compile_teal(algod, clear_src)
 
-    # ── Step 2: Create application ─────────────────────────────────────────────
-    print("[2] Deploying application…")
+    # ── Step 2: Bare ApplicationCreate ────────────────────────────────────────
+    # No ABI method in this txn; create_market called separately after funding.
+    print("[2] Creating application (bare create)…")
     create_txn = transaction.ApplicationCreateTxn(
         sender=deployer_addr,
         sp=sp,
@@ -123,11 +134,10 @@ def deploy_market(question: str, close_ts: int) -> dict:
             num_uints=LOCAL_INTS,
             num_byte_slices=LOCAL_BYTES,
         ),
-        # NOTE: bare create (no ABI method call yet — state initialised below)
     )
 
     signed_create = create_txn.sign(deployer_pk)
-    txid = algod.send_transaction(signed_create)
+    txid          = algod.send_transaction(signed_create)
     print(f"    tx: {txid}")
     result      = wait_for_confirmation(algod, txid)
     app_id      = result["application-index"]
@@ -135,7 +145,8 @@ def deploy_market(question: str, close_ts: int) -> dict:
     print(f"[OK] App ID: {app_id}  Address: {app_address}")
 
     # ── Step 3: Fund contract min-balance ──────────────────────────────────────
-    # Needs 0.1 ALGO base + 2 × 0.1 ASA holdings + fee buffer = 0.5 ALGO minimum
+    # Must fund BEFORE create_market so inner txns (ASA creation) can pay fees.
+    # 0.1 ALGO base + 2×0.1 ASA slots + 3×fee buffer = 0.5 ALGO minimum.
     print("[3] Funding contract min-balance…")
     fund_txn = transaction.PaymentTxn(
         sender=deployer_addr,
@@ -148,23 +159,23 @@ def deploy_market(question: str, close_ts: int) -> dict:
     wait_for_confirmation(algod, fund_txid)
     print(f"[OK] Funded {MIN_BALANCE_BUFFER} microAlgos → {app_address}")
 
-    # ── Step 4: Call create_market ABI method ──────────────────────────────────
+    # ── Step 4: Call create_market() ABI method ──────────────────────────────
     print("[4] Calling create_market()…")
-    sp_inner = algod.suggested_params()
-    sp_inner.fee = 3000   # cover 2 inner txns (YES + NO ASA creation) + outer
-    sp_inner.flat_fee = True
+    # Fee = 1 outer + 2 inner txns (YES ASA + NO ASA) = 3000 microAlgos
+    sp_init = algod.suggested_params()
+    sp_init.fee      = 3000
+    sp_init.flat_fee = True
 
-    contract_abi = algosdk.abi.Contract.from_json(json.dumps(abi))
+    contract_abi  = algosdk.abi.Contract.from_json(json.dumps(abi))
     create_method = next(m for m in contract_abi.methods if m.name == "create_market")
+    signer        = algosdk.atomic_transaction_composer.AccountTransactionSigner(deployer_pk)
 
     atc = algosdk.atomic_transaction_composer.AtomicTransactionComposer()
-    signer = algosdk.atomic_transaction_composer.AccountTransactionSigner(deployer_pk)
-
     atc.add_method_call(
         app_id=app_id,
         method=create_method,
         sender=deployer_addr,
-        sp=sp_inner,
+        sp=sp_init,
         signer=signer,
         method_args=[question, close_ts],
     )
@@ -210,14 +221,52 @@ def _decode_state(state: list) -> dict:
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), "..", "backend", ".env"))
+def register_market_with_backend(deployment: dict, backend_url: str, token: str) -> None:
+    """
+    POST the deployed market to the backend so it appears in the app.
+    Requires a valid JWT (log in first: POST /auth/login).
+    """
+    import urllib.request
+    import urllib.error
 
+    payload = {
+        "question":   deployment["question"],
+        "expiry":     deployment["close_ts"],
+        "app_id":     deployment["app_id"],
+        "app_address": deployment["app_address"],
+        "yes_asa_id": deployment["yes_asa_id"],
+        "no_asa_id":  deployment["no_asa_id"],
+    }
+    data = json.dumps(payload).encode()
+    req  = urllib.request.Request(
+        f"{backend_url}/markets/generate",
+        data=data,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            print(f"\n[OK] Market registered — backend id: {body['market']['id']}")
+    except urllib.error.HTTPError as e:
+        print(f"\n[WARN] Backend registration failed ({e.code}): {e.read().decode()}")
+        print("       Register manually: POST /markets/generate with the deployment JSON above.")
+
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Deploy a CastAlgo prediction market")
-    parser.add_argument("--question",  required=True, help="YES/NO market question")
-    parser.add_argument("--close-ts",  type=int,       help="Unix close timestamp (default: 24h from now)")
+    parser.add_argument("--question",     required=True,  help="YES/NO market question")
+    parser.add_argument("--close-ts",     type=int,       help="Unix close timestamp (default: 30d from now)")
+    parser.add_argument("--backend-url",  default="http://localhost:4000", help="Backend API URL")
+    parser.add_argument("--token",        default="",     help="JWT token (optional — skips backend registration if omitted)")
     args = parser.parse_args()
 
-    close_ts = args.close_ts or int(time.time()) + 86_400  # 24 hours
-    deploy_market(args.question, close_ts)
+    close_ts = args.close_ts or int(time.time()) + 30 * 86_400  # 30 days
+
+    result = deploy_market(args.question, close_ts)
+
+    if args.token:
+        register_market_with_backend(result, args.backend_url, args.token)
+    else:
+        print("\n[i] Pass --token <JWT> to auto-register this market with the backend.")
+        print("    Or POST to /markets/generate manually with the JSON above.")
