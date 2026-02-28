@@ -75,6 +75,12 @@ export class TwitterService {
    */
   private accountSince: Map<string, number> = new Map();
 
+  /**
+   * Cycle counter for round-robin rotation through all accounts.
+   * Ensures all accounts get checked, not just the first 10.
+   */
+  private cycleCount: number = 0;
+
   constructor() {
     const bearerToken = process.env.TWITTER_BEARER_TOKEN;
     this.rapidApiKey = process.env.RAPIDAPI_KEY;
@@ -241,16 +247,38 @@ export class TwitterService {
         return []; // Return empty array instead of mock data
       }
 
-      console.log(`Fetching tweets from ${INFLUENTIAL_ACCOUNTS.length} influential accounts...`);
+      console.log(`Fetching tweets from influential accounts...`);
       
+      // Round-robin rotation through all accounts, checking 10 per cycle
+      const accountsPerCycle = 10;
+      const totalAccounts = INFLUENTIAL_ACCOUNTS.length;
+      
+      // Calculate which accounts to check in this cycle
+      const startIdx = (this.cycleCount * accountsPerCycle) % totalAccounts;
+      let accountsToCheck: string[] = [];
+      
+      // Handle wrapping: if we need accounts that wrap around the end
+      if (startIdx + accountsPerCycle <= totalAccounts) {
+        // Normal case: no wrapping
+        accountsToCheck = INFLUENTIAL_ACCOUNTS.slice(startIdx, startIdx + accountsPerCycle);
+      } else {
+        // Wrapping case: get end of array + beginning of array
+        accountsToCheck = [
+          ...INFLUENTIAL_ACCOUNTS.slice(startIdx),
+          ...INFLUENTIAL_ACCOUNTS.slice(0, (startIdx + accountsPerCycle) % totalAccounts)
+        ];
+      }
+      
+      console.log(`[TwitterService] Cycle ${this.cycleCount}: Checking accounts ${startIdx} to ${startIdx + accountsPerCycle - 1} (wrapped): ${accountsToCheck.join(', ')}`);
+      
+      // Increment cycle for next time
+      this.cycleCount++;
+
       // Monitor influential accounts for prediction market opportunities
       const trends: TrendData[] = [];
       const cycleStart = Date.now();
 
-      // Process up to 10 accounts per cycle to stay within RapidAPI rate limits.
-      // Accounts rotate naturally because we skip ones with no new tweets.
-      const maxAccountsPerCycle = Math.min(INFLUENTIAL_ACCOUNTS.length, 10);
-      for (const username of INFLUENTIAL_ACCOUNTS.slice(0, maxAccountsPerCycle)) {
+      for (const username of accountsToCheck) {
         const sinceMs = this.accountSince.get(username) ?? cycleStart;
 
         try {

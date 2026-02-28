@@ -3,6 +3,7 @@ import { TrendFilterService } from '../services/trendFilter.service';
 import { MarketGeneratorService } from '../services/marketGenerator.service';
 import { ProbabilityService } from '../services/probability.service';
 import { AdvisorService } from '../services/advisor.service';
+import { tickerExtractionService } from '../services/tickerExtraction.service';
 import { getDatabase, StoredMarket } from '../services/database.service';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -131,7 +132,13 @@ export class MarketAgent {
 
       // Step 5: Validate market
       state.step = 'validating_market';
-      this.validateMarket(state.generated_market, state.probability_estimate);
+      try {
+        this.validateMarket(state.generated_market, state.probability_estimate);
+        console.log('[MarketAgent] ✅ Market validation passed');
+      } catch (validationError) {
+        console.error('[MarketAgent] ❌ Validation failed:', validationError instanceof Error ? validationError.message : validationError);
+        throw validationError;
+      }
 
       // Step 6: Save to database
       state.step = 'saving_to_database';
@@ -201,12 +208,38 @@ export class MarketAgent {
   }
 
   private validateMarket(market: any, probability: any): void {
+    // Convert Unix timestamp (seconds) to milliseconds if needed
+    let expiryDate: Date;
+    if (typeof market.expiry === 'number') {
+      // If it's a number, it could be Unix seconds or milliseconds
+      // Unix timestamps are typically between 1.6B - 1.7B (seconds), milliseconds would be 1e12+
+      const ms = market.expiry > 1e11 ? market.expiry : market.expiry * 1000;
+      expiryDate = new Date(ms);
+    } else {
+      // Assume it's an ISO string or other Date-parseable format
+      expiryDate = new Date(market.expiry);
+    }
+
+    const now = new Date();
+    const minBufferMs = 5000; // 5 second minimum buffer
+    const expiryWithBuffer = new Date(expiryDate.getTime() + minBufferMs);
+
+    // Log expiry validation details for debugging
+    console.log(`[MarketAgent] Validating expiry:`, {
+      expiry: market.expiry,
+      expiryDate: expiryDate.toISOString(),
+      now: now.toISOString(),
+      isValid: !isNaN(expiryDate.getTime()),
+      isFuture: expiryDate > now,
+      isFutureWithBuffer: expiryWithBuffer > now,
+    });
+
     const validations = [
       { check: market.question && market.question.length > 10, message: 'Question too short' },
       { check: market.data_source && market.data_source.length > 5, message: 'Data source missing' },
-      { check: new Date(market.expiry) > new Date(), message: 'Expiry in past' },
+      { check: !isNaN(expiryDate.getTime()), message: 'Expiry is invalid date' },
+      { check: expiryWithBuffer > now, message: 'Expiry in past or too soon' },
       { check: probability && typeof probability.probability === 'number' && probability.probability >= 0 && probability.probability <= 1, message: 'Invalid probability' }
-      // Removed low confidence check for hackathon mode - all markets are accepted
     ];
 
     const failedValidations = validations.filter(v => !v.check);
@@ -226,6 +259,9 @@ export class MarketAgent {
         return;
       }
 
+      // Extract ticker information from the market question
+      const tickerInfo = tickerExtractionService.extractTicker(market.question);
+
       const storedMarket: StoredMarket = {
         id: uuidv4(),
         question: market.question,
@@ -241,10 +277,21 @@ export class MarketAgent {
         tweet_author: trend.tweet_author,
         tweet_content: trend.tweet_content || trend.trend,
         category: trend.category,
-        volume: trend.volume
+        volume: trend.volume,
+        ticker: tickerInfo?.ticker || null,
+        asset_type: tickerInfo?.assetType || null,
       };
 
       db.saveMarket(storedMarket);
+      
+      // Log ticker extraction if found
+      if (tickerInfo) {
+        console.log(`[MarketAgent] ✓ Extracted ticker: ${tickerInfo.ticker} (${tickerInfo.assetType || 'unknown'}) - Confidence: ${tickerInfo.confidence}`);
+        if (tickerInfo.notes) {
+          console.log(`   ${tickerInfo.notes}`);
+        }
+      }
+
       // Track this tweet as processed so it won't generate another market
       if (trend.tweet_id) {
         this.processedTweetIds.add(trend.tweet_id);

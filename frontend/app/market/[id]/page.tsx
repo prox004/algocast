@@ -14,6 +14,7 @@ import {
 } from '@/lib/api';
 import BuyPanel from '@/components/BuyPanel';
 import AIInsightPanel from '@/components/AIInsightPanel';
+import PriceChart from '@/components/PriceChart';
 
 export default function MarketDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -147,6 +148,11 @@ export default function MarketDetailPage() {
 
       {/* AI Insight */}
       <AIInsightPanel marketId={market.id} />
+
+      {/* Price Chart - Show if ticker exists */}
+      {market.ticker && (
+        <PriceChart marketId={market.id} ticker={market.ticker} assetType={market.asset_type} />
+      )}
 
       {/* Claim */}
       {isLoggedIn && market.resolved && (

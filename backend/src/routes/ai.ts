@@ -210,6 +210,17 @@ router.post('/validate-market', auth, async (req, res) => {
   try {
     const { question, data_source, expiry, ai_probability } = req.body;
     
+    // Convert Unix timestamp (seconds) to milliseconds if needed
+    let expiryDate: Date;
+    if (typeof expiry === 'number') {
+      // If it's a number, it could be Unix seconds or milliseconds
+      // Unix timestamps are typically between 1.6B - 1.7B (seconds), milliseconds would be 1e12+
+      const ms = expiry > 1e11 ? expiry : expiry * 1000;
+      expiryDate = new Date(ms);
+    } else {
+      expiryDate = new Date(expiry);
+    }
+    
     const validations = [
       { 
         field: 'question', 
@@ -226,7 +237,7 @@ router.post('/validate-market', auth, async (req, res) => {
       { 
         field: 'expiry', 
         value: expiry, 
-        check: expiry && new Date(expiry) > new Date(),
+        check: !isNaN(expiryDate.getTime()) && expiryDate > new Date(),
         message: 'Expiry must be a valid future date'
       },
       { 

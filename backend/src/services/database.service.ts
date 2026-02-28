@@ -19,6 +19,8 @@ export interface StoredMarket {
   tweet_content?: string;
   category: string;
   volume: number;
+  ticker?: string | null;
+  asset_type?: 'stock' | 'crypto' | null;
 }
 
 export interface MarketFilter {
@@ -57,9 +59,27 @@ export class DatabaseService {
         tweet_author TEXT,
         tweet_content TEXT,
         category TEXT NOT NULL,
-        volume INTEGER NOT NULL
+        volume INTEGER NOT NULL,
+        ticker TEXT,
+        asset_type TEXT
       )
     `);
+
+    // Migrate existing table if needed
+    try {
+      this.db.prepare('SELECT ticker FROM markets LIMIT 1').get();
+    } catch (err) {
+      console.log('[DatabaseService] Migrating markets table: adding ticker and asset_type columns');
+      try {
+        this.db.exec(`
+          ALTER TABLE markets ADD COLUMN ticker TEXT;
+          ALTER TABLE markets ADD COLUMN asset_type TEXT;
+        `);
+      } catch (migErr) {
+        // Columns might already exist
+        console.log('[DatabaseService] Columns may already exist, skipping ALTER');
+      }
+    }
 
     // Create indexes for common queries
     this.db.exec(`
@@ -68,6 +88,7 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_markets_tweet_author ON markets(tweet_author);
       CREATE INDEX IF NOT EXISTS idx_markets_category ON markets(category);
       CREATE INDEX IF NOT EXISTS idx_markets_created_at ON markets(created_at);
+      CREATE INDEX IF NOT EXISTS idx_markets_ticker ON markets(ticker);
     `);
 
     // Create full-text search virtual table for questions
@@ -91,8 +112,8 @@ export class DatabaseService {
       INSERT INTO markets (
         id, question, data_source, expiry, ai_probability, confidence,
         reasoning, suggested_action, status, result, created_at, closed_at,
-        tweet_id, tweet_author, tweet_content, category, volume
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        tweet_id, tweet_author, tweet_content, category, volume, ticker, asset_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -112,7 +133,9 @@ export class DatabaseService {
       market.tweet_author || null,
       market.tweet_content || null,
       market.category,
-      market.volume
+      market.volume,
+      market.ticker || null,
+      market.asset_type || null
     );
 
     // Add to FTS index

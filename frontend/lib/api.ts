@@ -103,6 +103,8 @@ export interface Market {
   no_reserve: number;
   resolved: boolean;
   outcome: 0 | 1 | null;
+  ticker?: string | null;
+  asset_type?: 'stock' | 'crypto' | null;
 }
 
 export interface Trade {
@@ -120,6 +122,34 @@ export interface AIAnalysis {
   ai_probability: number;
   summary: string;
   sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+}
+
+export interface PricePoint {
+  timestamp: number;
+  price: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+}
+
+export interface CurrentPrice {
+  ticker: string;
+  price: number;
+  currency: string;
+  priceChange24h?: number;
+  priceChangePercent24h?: number;
+  volumeUSD?: number;
+  marketCap?: number;
+  timestamp: number;
+}
+
+export interface PriceGraph {
+  ticker: string;
+  assetType: 'stock' | 'crypto';
+  current: CurrentPrice;
+  historical: PricePoint[];
+  timeRange: '1h' | '24h' | '7d' | '30d' | '1y';
+  source: string;
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -212,6 +242,15 @@ export async function claimWinnings(market_id: string): Promise<{ success: boole
     method: 'POST',
     body: JSON.stringify({ market_id }),
   });
+}
+
+export async function getMarketPriceGraph(market_id: string, days?: number): Promise<{ success: boolean; market: any; priceData: PriceGraph }> {
+  const url = days ? `/markets/${market_id}/price?days=${days}` : `/markets/${market_id}/price`;
+  return request(url);
+}
+
+export async function getMarketCurrentPrice(market_id: string): Promise<{ success: boolean; currentPrice: CurrentPrice }> {
+  return request(`/markets/${market_id}/current-price`);
 }
 
 export async function resolveMarket(market_id: string, outcome: 0 | 1): Promise<{ success: boolean }> {

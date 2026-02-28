@@ -216,7 +216,7 @@ export class AutoMarketGeneratorService {
     }
 
     this.isRunning = true;
-    const intervalMin = parseInt(process.env.AUTO_MARKET_GEN_INTERVAL_MIN || '5', 10);
+    const intervalMin = parseInt(process.env.AUTO_MARKET_GEN_INTERVAL_MIN || '2', 10);
     const intervalMs = Math.max(intervalMin * 60 * 1000, 1000); // min 1 second
 
     console.log(`[AutoMarketGen] Starting auto-generation loop every ${intervalMin} minutes`);
@@ -261,7 +261,11 @@ export class AutoMarketGeneratorService {
       const result = await this.marketAgent.processMarketGeneration();
 
       if (result.error) {
-        console.warn('❌ [AutoMarketGen] Pipeline error:', result.error);
+        console.error('❌ [AutoMarketGen] Pipeline error details:');
+        console.error('   Error:', result.error);
+        console.error('   Step:', result.step);
+        console.error('   Generated Market:', result.generated_market ? { question: result.generated_market.question, expiry: result.generated_market.expiry } : 'none');
+        console.error('   Probability:', result.probability_estimate);
         return;
       }
 

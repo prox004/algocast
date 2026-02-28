@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { getDatabase } from '../services/database.service';
+import { priceDataService } from '../services/priceData.service';
 
 const router = express.Router();
 
@@ -245,6 +246,132 @@ router.put('/:id/close', async (req: Request, res: Response): Promise<void> => {
     res.status(500).json({
       success: false,
       error: 'Failed to close market'
+    });
+  }
+});
+
+/**
+ * GET /api/markets/:id/price
+ * Get price data and graph for a market's ticker
+ */
+router.get('/:id/price', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+    const { days } = req.query;
+
+    const market = db.getMarketById(id);
+    if (!market) {
+      res.status(404).json({
+        success: false,
+        error: 'Market not found'
+      });
+      return;
+    }
+
+    // Convert the market to proper type
+    const marketData = market as any;
+
+    if (!marketData.ticker) {
+      res.status(400).json({
+        success: false,
+        error: 'Market does not have a ticker associated'
+      });
+      return;
+    }
+
+    const daysParam = parseInt(days as string) || 7;
+    const graph = await priceDataService.getPriceGraph(
+      marketData.ticker,
+      marketData.asset_type,
+      daysParam
+    );
+
+    if (!graph) {
+      res.status(404).json({
+        success: false,
+        error: `Could not fetch price data for ticker ${marketData.ticker}`
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      market: {
+        id,
+        question: marketData.question,
+        ticker: marketData.ticker
+      },
+      priceData: graph
+    });
+  } catch (error) {
+    console.error('Error fetching price data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch price data'
+    });
+  }
+});
+
+/**
+ * GET /api/markets/:id/current-price
+ * Get real-time current price for a market's ticker
+ */
+router.get('/:id/current-price', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const db = getDatabase();
+    const { id } = req.params;
+
+    const market = db.getMarketById(id);
+    if (!market) {
+      res.status(404).json({
+        success: false,
+        error: 'Market not found'
+      });
+      return;
+    }
+
+    const marketData = market as any;
+
+    if (!marketData.ticker) {
+      res.status(400).json({
+        success: false,
+        error: 'Market does not have a ticker'
+      });
+      return;
+    }
+
+    let currentPrice;
+    if (marketData.asset_type === 'crypto') {
+      currentPrice = await priceDataService.getCryptoPrice(marketData.ticker);
+    } else if (marketData.asset_type === 'stock') {
+      currentPrice = await priceDataService.getStockPrice(marketData.ticker);
+    } else {
+      // Try to auto-detect
+      currentPrice = await priceDataService.getPriceGraph(
+        marketData.ticker,
+        null,
+        1
+      ).then(g => g?.current || null);
+    }
+
+    if (!currentPrice) {
+      res.status(404).json({
+        success: false,
+        error: `Could not fetch current price for ${marketData.ticker}`
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      currentPrice
+    });
+  } catch (error) {
+    console.error('Error fetching current price:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch current price'
     });
   }
 });

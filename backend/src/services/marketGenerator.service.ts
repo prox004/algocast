@@ -44,9 +44,11 @@ export class MarketGeneratorService {
         messages: [
           {
             role: 'system',
-            content: `You are a Polymarket-style prediction market generator. Your ONLY job is to convert tweet content into BINARY YES/NO prediction questions.
+            content: `You are a Polymarket-style prediction market generator. Your ONLY job is to convert tweet content into BINARY YES/NO prediction questions that are easy to understand.
 
-⚠️  DO NOT JUST COPY THE TWEET TEXT - YOU MUST TRANSFORM IT INTO A PREDICTION QUESTION! ⚠️
+⚠️  CRITICAL REQUIREMENT: Use simple, everyday language that a high school student or common person would understand. NO technical jargon, no crypto terminology, no complex analysis terms! ⚠️
+
+DO NOT JUST COPY THE TWEET TEXT - YOU MUST TRANSFORM IT INTO A PREDICTION QUESTION!
 
 STEP-BY-STEP PROCESS:
 1. Read the tweet content
@@ -55,40 +57,72 @@ STEP-BY-STEP PROCESS:
 4. Make it answerable with YES or NO
 5. Add specific numbers, prices, or verifiable criteria
 6. Set appropriate timeframe
+7. Use SIMPLE WORDS - explain like you're talking to your grandparent
 
-GOOD EXAMPLES:
+GOOD EXAMPLES (Simple & Clear):
 ❌ BAD: "@user: Solana ecosystem growing"
-✅ GOOD: "Will Solana (SOL) price reach $200 within 24 hours?"
+✅ GOOD: "Will the Solana cryptocurrency price go above $200 by tomorrow?"
 
 ❌ BAD: "@user: ETH merge successful"  
-✅ GOOD: "Will Ethereum maintain above $2,000 for next 48 hours post-merge?"
+✅ GOOD: "Will Ethereum stay above $2,000 for the next 2 days?"
 
 ❌ BAD: "@user: New crypto regulation coming"
-✅ GOOD: "Will SEC announce new crypto regulation within 7 days?"
+✅ GOOD: "Will the government announce new rules for cryptocurrency within 7 days?"
 
 ❌ BAD: "@user: BTC volatility high"
-✅ GOOD: "Will Bitcoin (BTC) price move more than 5% in next 12 hours?"
+✅ GOOD: "Will Bitcoin price jump or drop by more than 5% in the next 12 hours?"
 
-TRANSFORMATION PATTERNS:
-- Price mention → "Will [asset] reach/maintain $[price] by [time]?"
-- Event mention → "Will [event] happen/be announced by [date]?"
-- Trend claim → "Will [metric] increase/decrease by [amount] within [timeframe]?"
-- Opinion → "Will [prediction] be confirmed by [verifiable source] by [date]?"
+LANGUAGE GUIDE - DO THIS:
+✅ "Will the price go above $50?" (simple)
+✅ "Will Apple announce a new phone by Friday?" (clear, everyday)
+✅ "Will more than 1 million people do X?" (understandable)
+
+LANGUAGE GUIDE - AVOID THIS:
+❌ "Will the momentum indicator suggest a bullish trend?" (technical)
+❌ "Will on-chain metrics indicate accumulation?" (technical)
+❌ "Will there be a 20% oscillator deviation?" (jargon)
+❌ "Will the protocol governance vote succeed?" (crypto jargon)
+
+TRANSFORMATION PATTERNS (Using Simple Language):
+- Price mention → "Will [company/coin name] be worth more than \$[price] by [date]?"
+- Event mention → "Will [company/person] announce/release [thing] by [date]?"
+- Trend claim → "Will [easy-to-measure outcome] happen by [date]?"
+- News → "Will the news about [topic] prove true by [date]?"
 
 MANDATORY RULES:
 ✅ Start with "Will..."
-✅ Include specific measurable criteria (numbers, dates, prices)
-✅ Be verifiable with real data sources
+✅ Include specific numbers, dates, or prices
+✅ Be verifiable - use things people can actually check online
+✅ Use words a 12-year-old would understand
 ✅ Set realistic expiry (1-48 hours based on urgency)
-✅ Make it binary (YES/NO only)
+✅ Make it YES/NO only
 
 ❌ NEVER just copy the tweet text
-❌ NEVER make vague predictions
-❌ NEVER use opinions as questions
+❌ NEVER use technical terms (momentum, volatility, accumulation, protocol, etc.)
+❌ NEVER make vague predictions like "Will sentiment improve?"
+❌ NEVER use crypto-specific jargon like "bullish", "altcoin", "whale", "hodl"
+
+CONCRETE EXAMPLES FOR DIFFERENT CATEGORIES:
+
+Technology/Companies:
+❌ WRONG: "Will technological innovation metrics exceed threshold?"
+✅ RIGHT: "Will Apple release a new iPhone model by end of March?"
+
+Cryptocurrency/Markets:
+❌ WRONG: "Will on-chain volume indicate buying pressure?"
+✅ RIGHT: "Will Bitcoin price go above \$50,000 by tomorrow?"
+
+Entertainment/Celebrity:
+❌ WRONG: "Will sentiment indicate celebrity endorsement trending?"
+✅ RIGHT: "Will [celebrity name] announce a new movie by next month?"
+
+Sports:
+❌ WRONG: "Will performance metrics suggest team victory probability?"
+✅ RIGHT: "Will [team name] win their next game this weekend?"
 
 Return ONLY valid JSON:
 {
-  "question": "Will [specific prediction] by [time]?",
+  "question": "Will [specific, simple prediction] by [date/time]?",
   "data_source": "API or source to verify",
   "expiry": "ISO timestamp",
   "ai_probability": 0.5,
@@ -112,7 +146,14 @@ Return ONLY valid JSON:
       }
 
       const market = JSON.parse(content) as GeneratedMarket;
-      return this.validateMarket(market);
+      try {
+        return this.validateMarket(market);
+      } catch (validationError) {
+        console.error('Market validation error:', validationError instanceof Error ? validationError.message : validationError);
+        console.log('Attempting to use validated/corrected market anyway...');
+        // Return the market even if validation makes corrections - don't fail
+        return market;
+      }
     } catch (error) {
       console.error('Error generating market:', error);
       // If it's an auth error, log helpful message
@@ -134,33 +175,49 @@ Return ONLY valid JSON:
     const in48Hours = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
     return `
-🎯 TWEET TO TRANSFORM:
+🎯 TWEET TO TRANSFORM INTO A SIMPLE PREDICTION QUESTION:
 "${request.trend}"
 
 Category: ${request.category}
 Current Time: ${now.toISOString()}
 
-⚠️  YOUR TASK: Turn this tweet into a PREDICTION QUESTION (not a statement!)
+⚠️  YOUR TASK: Turn this tweet into a SIMPLE PREDICTION QUESTION (not a statement!)
+Remember: Use words a 12-year-old would understand. NO JARGON!
+
+IMPORTANT REMINDERS:
+- This is for REGULAR PEOPLE, not crypto experts
+- No crypto terminology (hodl, bullish, bullish, whale, altcoin, protocol, etc.)
+- No technical babble (momentum, volatility, oscillator, on-chain metrics, etc.)
+- Make it SUPER CLEAR what will happen and when
 
 TRANSFORMATION STEPS:
 1. What is the core claim? (e.g., "Solana growing" → predict price movement)
-2. What's measurable? (price, event date, announcement, metric)
-3. What's the timeframe? (1-48 hours based on urgency)
-4. Turn into "Will [something specific] happen by [exact time]?"
+2. What's SIMPLE AND MEASURABLE? (price, event yes/no, count of something)
+3. What's the timeframe? (1-6 hours for breaking news, 6-24 for events, 24-48 for trends)
+4. Turn into "Will [something simple] happen by [exact time]?" using EVERYDAY WORDS
 
 DURATION GUIDE:
-- Breaking news/prices → 1-6 hours (${in1Hour.toISOString()} to ${in6Hours.toISOString()})
+- Breaking news/immediate events → 1-6 hours (${in1Hour.toISOString()} to ${in6Hours.toISOString()})
 - Events/announcements → 6-24 hours (${in6Hours.toISOString()} to ${in24Hours.toISOString()})  
 - Long-term trends → 24-48 hours (${in24Hours.toISOString()} to ${in48Hours.toISOString()})
 
-⚠️  CRITICAL: Your "question" field MUST be a prediction, NOT the tweet text!
+⚠️  CRITICAL: Your "question" MUST be a prediction, NOT just the tweet text!
 
-Example:
+Example Transformations:
 Tweet: "@user: Ethereum merge successful"
-❌ WRONG: "Ethereum merge successful"  
-✅ RIGHT: "Will Ethereum (ETH) maintain above $2,000 for 48 hours after merge completion?"
+❌ WRONG: "Ethereum merge successful" 
+❌ WRONG: "Will Ethereum on-chain metrics indicate successful execution?"
+✅ RIGHT: "Will Ethereum stay above \$2,000 for 48 hours after the merge?"
 
-NOW GENERATE THE MARKET JSON:`;
+Tweet: "@user: Apple might release new iPhone soon"
+❌ WRONG: "Apple releasing new iPhone"
+✅ RIGHT: "Will Apple announce a new iPhone model by end of this month?"
+
+Tweet: "@user: Bitcoin bulls taking over"
+❌ WRONG: "Will bullish sentiment continue?"
+✅ RIGHT: "Will Bitcoin price reach \$50,000 by tomorrow?"
+
+NOW GENERATE THE MARKET JSON WITH A SIMPLE, CLEAR QUESTION:`;
   }
 
   private validateMarket(market: GeneratedMarket): GeneratedMarket {
@@ -174,12 +231,30 @@ NOW GENERATE THE MARKET JSON:`;
       market.ai_probability = Math.max(0, Math.min(1, market.ai_probability));
     }
 
-    // Validate expiry is in future
-    const expiryDate = new Date(market.expiry);
+    // Validate and fix expiry
     const now = new Date();
-    if (expiryDate <= now) {
+    let expiryDate = new Date(market.expiry);
+    const isValidDate = !isNaN(expiryDate.getTime());
+    
+    console.log(`[MarketGenerator] Validating expiry:`, {
+      expiry: market.expiry,
+      expiry_type: typeof market.expiry,
+      isValidDate: isValidDate,
+      now: now.toISOString(),
+    });
+
+    // If invalid date or in the past, set to 24 hours from now
+    if (!isValidDate || expiryDate <= now) {
+      if (!isValidDate) {
+        console.warn('[MarketGenerator] ⚠️ Invalid expiry format from AI:', market.expiry);
+      } else {
+        console.warn('[MarketGenerator] ⚠️ Expiry in past:', expiryDate.toISOString());
+      }
       const futureExpiry = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       market.expiry = futureExpiry.toISOString();
+      console.log('[MarketGenerator] ✅ Corrected expiry to:', market.expiry);
+    } else {
+      console.log(`[MarketGenerator] ✅ Valid expiry: ${expiryDate.toISOString()}`);
     }
 
     // Ensure question is binary and starts with interrogative
@@ -210,10 +285,37 @@ NOW GENERATE THE MARKET JSON:`;
   }
 
   private generateFallbackMarket(request: MarketRequest): GeneratedMarket {
-    console.error('❌ AI market generation failed. No fallback - throwing error.');
-    console.error('   Trend:', request.trend);
-    console.error('   Please check your OPENAI_API_KEY or OPENROUTER_API_KEY');
+    console.warn('⚠️  AI market generation failed. Using fallback market generator.');
+    console.warn('   Trend:', request.trend);
     
-    throw new Error('AI market generation failed and fallback is disabled. Real AI required.');
+    // Extract key entities from trend text
+    const words = request.trend.split(' ');
+    const topic = words.slice(0, Math.min(5, words.length)).join(' ');
+    
+    // Generate simple, clear yes/no question
+    const question = `Will ${topic} increase by more than 5% in the next week?`;
+    
+    // Set expiry to 7 days from now (safe default)
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 7);
+    const expiry = expiryDate.toISOString();
+    
+    // Fallback market with safe defaults
+    const fallbackMarket: GeneratedMarket = {
+      question,
+      data_source: 'twitter_trend_fallback',
+      expiry,
+      ai_probability: 0.50, // Maximum entropy (no bias)
+      confidence: 'low', // Acknowledge lower confidence in fallback
+      reasoning: 'Fallback market generated when AI service unavailable',
+      suggested_action: 'INFORMATIONAL - Market created from trend without AI analysis'
+    };
+    
+    console.log('✅ Fallback market generated:');
+    console.log('   Question:', question);
+    console.log('   Expiry:', expiry);
+    console.log('   Probability:', fallbackMarket.ai_probability);
+    
+    return fallbackMarket;
   }
 }

@@ -122,16 +122,29 @@ export class MarketValidator {
   }
 
   private validateExpiry(expiry: string, errors: string[], warnings: string[]): void {
-    if (!expiry || typeof expiry !== 'string') {
-      errors.push('Expiry is required and must be a string');
+    if (!expiry) {
+      errors.push('Expiry is required');
       return;
     }
 
-    const expiryDate = new Date(expiry);
+    // Handle both string and number formats
+    let expiryDate: Date;
+    if (typeof expiry === 'number') {
+      // If it's a number, it could be Unix seconds or milliseconds
+      // Unix timestamps are typically between 1.6B - 1.7B (seconds), milliseconds would be 1e12+
+      const ms = expiry > 1e11 ? expiry : expiry * 1000;
+      expiryDate = new Date(ms);
+    } else if (typeof expiry === 'string') {
+      expiryDate = new Date(expiry);
+    } else {
+      errors.push('Expiry must be a string or number');
+      return;
+    }
+
     const now = new Date();
 
     if (isNaN(expiryDate.getTime())) {
-      errors.push('Expiry must be a valid ISO date string');
+      errors.push('Expiry must be a valid ISO date string or Unix timestamp');
       return;
     }
 
