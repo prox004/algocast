@@ -1,11 +1,11 @@
+// Load environment variables FIRST before any other imports
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import aiRoutes from './routes/ai';
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
-
-// Load environment variables
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -27,7 +27,7 @@ app.get('/health', (req, res) => {
     version: '1.0.0',
     services: {
       twitter: !!process.env.TWITTER_BEARER_TOKEN,
-      openai: !!process.env.OPENAI_API_KEY
+      openai: !!(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY)
     }
   });
 });
@@ -50,9 +50,15 @@ app.listen(PORT, () => {
   // Log environment status
   console.log('\n📋 Environment Status:');
   console.log(`   Twitter API: ${process.env.TWITTER_BEARER_TOKEN ? '✅' : '❌'}`);
-  console.log(`   OpenAI API: ${process.env.OPENAI_API_KEY ? '✅' : '❌'}`);
+  console.log(`   AI API: ${(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY) ? '✅' : '❌'}`);
   console.log(`   JWT Secret: ${process.env.JWT_SECRET ? '✅' : '❌'}`);
   console.log(`   Node ENV: ${process.env.NODE_ENV || 'development'}`);
+  
+  if (process.env.OPENROUTER_API_KEY) {
+    console.log(`   Using: OpenRouter (Llama 3.1)`);
+  } else if (process.env.OPENAI_API_KEY) {
+    console.log(`   Using: OpenAI GPT-4`);
+  }
 });
 
 export default app;

@@ -32,7 +32,7 @@ app.get('/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     services: {
       twitter: !!process.env.TWITTER_BEARER_TOKEN,
-      openai: !!process.env.OPENAI_API_KEY,
+      openai: !!(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY),
       jwt: !!process.env.JWT_SECRET
     }
   });
@@ -53,5 +53,10 @@ app.listen(PORT, () => {
   // Log AI service status
   console.log('\n📋 AI Services Status:');
   console.log(`   Twitter API: ${process.env.TWITTER_BEARER_TOKEN ? '✅' : '❌'}`);
-  console.log(`   OpenAI API: ${process.env.OPENAI_API_KEY ? '✅' : '❌'}`);
+  console.log(`   AI API: ${(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY) ? '✅' : '❌'}`);
+  if (process.env.OPENROUTER_API_KEY) {
+    console.log(`   Using: OpenRouter (Llama 3.1)`);
+  } else if (process.env.OPENAI_API_KEY) {
+    console.log(`   Using: OpenAI GPT-4`);
+  }
 });

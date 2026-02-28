@@ -30,11 +30,14 @@ export class ProbabilityService {
   private openai?: OpenAI;
 
   constructor() {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
     if (apiKey) {
-      this.openai = new OpenAI({ apiKey });
+      this.openai = new OpenAI({ 
+        apiKey,
+        baseURL: process.env.OPENROUTER_API_KEY ? 'https://openrouter.ai/api/v1' : undefined
+      });
     } else {
-      console.warn('OPENAI_API_KEY not set, using fallback probability estimation');
+      console.warn('No AI API key set, using fallback probability estimation');
     }
   }
 
@@ -149,7 +152,7 @@ Respond with only a number between 0 and 1 (e.g., 0.65 for 65% probability).
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: 'gpt-4',
+        model: process.env.OPENROUTER_API_KEY ? 'meta-llama/llama-3.1-8b-instruct:free' : 'gpt-4',
         messages: [
           {
             role: 'system',

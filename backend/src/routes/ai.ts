@@ -3,8 +3,24 @@ import { MarketAgent } from '../agents/marketAgent';
 import { AdvisorService } from '../services/advisor.service';
 
 const router = express.Router();
-const marketAgent = new MarketAgent();
-const advisorService = new AdvisorService();
+
+// Lazy-load services to ensure env vars are loaded
+let marketAgent: MarketAgent | null = null;
+let advisorService: AdvisorService | null = null;
+
+const getMarketAgent = () => {
+  if (!marketAgent) {
+    marketAgent = new MarketAgent();
+  }
+  return marketAgent;
+};
+
+const getAdvisorService = () => {
+  if (!advisorService) {
+    advisorService = new AdvisorService();
+  }
+  return advisorService;
+};
 
 // Simple auth middleware type
 const auth = (req: any, res: any, next: any) => {
@@ -15,7 +31,7 @@ const auth = (req: any, res: any, next: any) => {
 // GET /scan-trends - Scan and return filtered trends
 router.get('/scan-trends', auth, async (req, res) => {
   try {
-    const trends = await marketAgent.scanTrendsOnly();
+    const trends = await getMarketAgent().scanTrendsOnly();
     
     res.json({
       success: true,
@@ -33,6 +49,37 @@ router.get('/scan-trends', auth, async (req, res) => {
   }
 });
 
+// GET /scan-user/:username - Get latest tweets from specific user
+router.get('/scan-user/:username', auth, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const agent = getMarketAgent();
+    
+    // Access the Twitter service through the agent
+    const tweets = await (agent as any).twitterService.getUserLatestTweets(username, 10);
+    
+    res.json({
+      success: true,
+      username,
+      tweets: tweets.map((tweet: any) => ({
+        id: tweet.id,
+        text: tweet.text,
+        created_at: tweet.created_at,
+        metrics: tweet.public_metrics
+      })),
+      count: tweets.length,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('User tweet scanning error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to scan user tweets',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // POST /generate-market - Generate market from trend or auto-generate
 router.post('/generate-market', auth, async (req, res) => {
   try {
@@ -41,10 +88,10 @@ router.post('/generate-market', auth, async (req, res) => {
     let result;
     if (trend) {
       // Generate market from specific trend
-      result = await marketAgent.generateMarketFromTrend(trend, category);
+      result = await getMarketAgent().generateMarketFromTrend(trend, category);
     } else {
       // Auto-generate from current trends
-      const pipelineResult = await marketAgent.processMarketGeneration();
+      const pipelineResult = await getMarketAgent().processMarketGeneration();
       
       if (pipelineResult.error) {
         throw new Error(pipelineResult.error);
@@ -104,14 +151,14 @@ router.post('/advisory', auth, async (req, res) => {
       });
     }
 
-    const advisory = advisorService.analyzeMarket({
+    const advisory = getAdvisorService().analyzeMarket({
       ai_probability,
       market_probability,
       market_id,
       question
     });
 
-    const detailedAnalysis = advisorService.generateDetailedAnalysis({
+    const detailedAnalysis = getAdvisorService().generateDetailedAnalysis({
       ai_probability,
       market_probability,
       market_id,
