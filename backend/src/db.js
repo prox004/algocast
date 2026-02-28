@@ -43,6 +43,20 @@ const db = {
     return user;
   },
 
+  updateUserOAuth(id, provider, oauthId) {
+    const user = this.users.get(id);
+    if (!user) return null;
+    user.oauth_provider = provider;
+    user.oauth_id = oauthId;
+    return user;
+  },
+
+  getUserByOAuth(provider, oauthId) {
+    return Array.from(this.users.values()).find(
+      (u) => u.oauth_provider === provider && u.oauth_id === oauthId
+    ) || null;
+  },
+
   // ── Markets ────────────────────────────────────────────────────────────────
 
   createMarket(market) {

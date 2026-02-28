@@ -2,6 +2,10 @@
  * routes/auth.js
  * POST /auth/register  — create account + custodial wallet
  * POST /auth/login     — authenticate and return JWT
+ * GET  /auth/google    — initiate Google OAuth
+ * GET  /auth/google/callback — Google OAuth callback
+ * GET  /auth/github    — initiate GitHub OAuth
+ * GET  /auth/github/callback — GitHub OAuth callback
  */
 
 const express = require('express');
@@ -14,6 +18,14 @@ const { normalizeAddress } = require('../wallet/custodialWallet');
 const { fundUserAccount } = require('../algorand/transactionBuilder');
 
 const router = express.Router();
+
+// Import passport if available (TypeScript compiled version)
+let passport;
+try {
+  passport = require('../config/passport').default;
+} catch (err) {
+  console.warn('[auth] Passport not configured - OAuth routes disabled');
+}
 
 function signToken(user) {
   return jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, {
@@ -130,5 +142,49 @@ router.post('/login', async (req, res) => {
     return res.status(500).json({ error: 'Login failed' });
   }
 });
+
+// ── OAuth Routes ─────────────────────────────────────────────────────────────
+
+if (passport) {
+  // Google OAuth
+  router.get('/google', passport.authenticate('google', { 
+    scope: ['profile', 'email'],
+    session: false 
+  }));
+
+  router.get('/google/callback',
+    passport.authenticate('google', { session: false, failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=oauth_failed` }),
+    (req, res) => {
+      try {
+        const token = signToken(req.user);
+        // Redirect to frontend with token in URL
+        res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?token=${token}`);
+      } catch (err) {
+        console.error('[google callback]', err.message);
+        res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=token_generation_failed`);
+      }
+    }
+  );
+
+  // GitHub OAuth
+  router.get('/github', passport.authenticate('github', { 
+    scope: ['user:email'],
+    session: false 
+  }));
+
+  router.get('/github/callback',
+    passport.authenticate('github', { session: false, failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=oauth_failed` }),
+    (req, res) => {
+      try {
+        const token = signToken(req.user);
+        // Redirect to frontend with token in URL
+        res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?token=${token}`);
+      } catch (err) {
+        console.error('[github callback]', err.message);
+        res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=token_generation_failed`);
+      }
+    }
+  );
+}
 
 module.exports = router;
