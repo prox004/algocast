@@ -15,18 +15,42 @@ const { getAlgodClient } = require('../algorand/client');
 const router = express.Router();
 
 // GET /wallet/balance (protected)
-router.get('/balance', requireAuth, (req, res) => {
-  const user = db.getUserById(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  
-  // Explicitly construct response with only expected fields
-  const response = {
-    balance: Number(user.balance) || 0,
-    custodial_address: normalizeAddress(user.custodial_address),
-    email: String(user.email || ''),
-  };
-  
-  return res.json(response);
+router.get('/balance', requireAuth, async (req, res) => {
+  try {
+    const user = db.getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    const custodialAddress = normalizeAddress(user.custodial_address);
+    if (!custodialAddress) {
+      return res.status(400).json({ error: 'User custodial address missing' });
+    }
+
+    // Always fetch directly from blockchain for truth
+    const algod = getAlgodClient();
+    const accountInfo = await algod.accountInformation(custodialAddress).do();
+    const onChainBalance = Number(accountInfo?.amount || 0);
+
+    // Sync in DB
+    const updatedUser = db.updateUser(user.id, { balance: onChainBalance });
+    
+    // Explicitly construct response with only expected fields
+    const response = {
+      balance: Number(updatedUser.balance) || 0,
+      custodial_address: custodialAddress,
+      email: String(user.email || ''),
+    };
+    
+    return res.json(response);
+  } catch (err) {
+    console.error('[wallet/balance]', err.message);
+    const user = db.getUserById(req.user.id);
+    // Fallback to DB if algod fails
+    return res.json({
+      balance: Number(user?.balance) || 0,
+      custodial_address: normalizeAddress(user?.custodial_address),
+      email: String(user?.email || ''),
+    });
+  }
 });
 
 // POST /wallet/sync-balance (protected)

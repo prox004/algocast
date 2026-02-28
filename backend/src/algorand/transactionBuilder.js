@@ -273,6 +273,7 @@ function isContractReady() {
 
 /**
  * Fund a user's custodial address using the backend's deployer wallet.
+ * Supports both LocalNet (via KMD) and TestNet (via mnemonic).
  * This is the on-chain deposit mechanism.
  *
  * @param {{
@@ -286,15 +287,63 @@ async function fundUserAccount(params) {
   if (amountMicroAlgos <= 0) throw new Error('amountMicroAlgos must be > 0');
   if (!toAddress) throw new Error('toAddress is required');
 
-  const mnemonic = process.env.DEPLOYER_MNEMONIC;
-  if (!mnemonic) throw new Error('DEPLOYER_MNEMONIC not set in .env');
+  const network = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();
+  const algod = getAlgodClient();
+  
+  let account;
+  
+  if (network === 'local' || network === 'localnet') {
+    // LocalNet: Get account from KMD (default funded account)
+    console.log('[fundUserAccount] Using LocalNet KMD...');
+    const KMD_URL = process.env.KMD_URL || 'http://localhost:4002';
+    const KMD_TOKEN = process.env.KMD_TOKEN || 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    
+    try {
+      const kmd = new algosdk.Kmd(KMD_TOKEN, KMD_URL);
+      
+      // List wallets
+      const wallets = await kmd.listWallets();
+      const defaultWallet = wallets.wallets.find((w) => w.name === 'unencrypted-default-wallet');
+      if (!defaultWallet) {
+        throw new Error('unencrypted-default-wallet not found in KMD. Run: algokit localnet start');
+      }
+      
+      // Get wallet handle (no password needed for default wallet)
+      const { wallet_handle_token } = await kmd.initWalletHandle(defaultWallet.id, '');
+      
+      // Get first address in wallet
+      const { addresses } = await kmd.listKeys(wallet_handle_token);
+      if (!addresses || addresses.length === 0) {
+        throw new Error('No accounts found in KMD wallet');
+      }
+      
+      const deployerAddress = addresses[0];
+      console.log(`[fundUserAccount] Using KMD account: ${deployerAddress}`);
+      
+      // Export private key
+      const { private_key } = await kmd.exportKey(wallet_handle_token, '', deployerAddress);
+      const sk = Buffer.from(private_key, 'base64');
+      account = { sk, addr: deployerAddress };
+      
+      // Release wallet handle
+      await kmd.releaseWalletHandle(wallet_handle_token);
+    } catch (err) {
+      console.error('[fundUserAccount] KMD error:', err.message);
+      throw new Error(`Failed to get account from KMD: ${err.message}`);
+    }
+  } else {
+    // TestNet: Get account from mnemonic
+    const mnemonic = process.env.DEPLOYER_MNEMONIC;
+    if (!mnemonic) {
+      throw new Error('DEPLOYER_MNEMONIC not set in .env for TestNet');
+    }
+    console.log('[fundUserAccount] Using TestNet mnemonic...');
+    account = algosdk.mnemonicToSecretKey(mnemonic);
+  }
 
-  // Recover deployer account from mnemonic
-  const account = algosdk.mnemonicToSecretKey(mnemonic);
   const fromAddress = normalizeAddress(account.addr);
   const recipientAddress = normalizeAddress(toAddress);
 
-  const algod = getAlgodClient();
   const sp    = await algod.getTransactionParams().do();
   sp.fee      = 1000;
   sp.flatFee  = true;
@@ -313,6 +362,7 @@ async function fundUserAccount(params) {
 
   // Broadcast and wait for confirmation
   const txid = await broadcast(signed);
+  console.log(`[fundUserAccount] ✅ Funded ${recipientAddress} with ${amountMicroAlgos / 1e6} ALGO. TxID: ${txid}`);
   return txid;
 }
 

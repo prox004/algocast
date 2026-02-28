@@ -11,6 +11,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { generateCustodialWallet } = require('../wallet/custodialWallet');
 const { normalizeAddress } = require('../wallet/custodialWallet');
+const { fundUserAccount } = require('../algorand/transactionBuilder');
 
 const router = express.Router();
 
@@ -43,13 +44,33 @@ router.post('/register', async (req, res) => {
     const hashed_password = await bcrypt.hash(password, 12);
     const { address, encryptedKey } = generateCustodialWallet();
 
+    // Drip 100 ALGO automatically upon wallet creation
+    let initialBalance = 0;
+    try {
+      const network = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();
+      if (network === 'local' || network === 'localnet' || network === 'testnet') {
+        const amountMicroAlgos = 100_000_000; // 100 ALGO
+        console.log(`[register] Dripping ${amountMicroAlgos / 1e6} ALGO to new custodial wallet ${address}...`);
+        await fundUserAccount({
+          toAddress: address,
+          amountMicroAlgos,
+        });
+        initialBalance = amountMicroAlgos;
+        console.log(`[register] ✅ Funding successful. Balance: ${initialBalance / 1e6} ALGO`);
+      }
+    } catch (dripErr) {
+      console.error('[register] ⚠️  Drip failed:', dripErr.message);
+      console.error('[register] Stack:', dripErr.stack);
+      console.log('[register] Continuing without initial funds...');
+    }
+
     const user = db.createUser({
       id: uuidv4(),
       email: email.toLowerCase(),
       hashed_password,
       custodial_address: address,
       encrypted_private_key: encryptedKey, // NEVER sent to frontend
-      balance: 0,
+      balance: initialBalance,
     });
 
     const token = signToken(user);

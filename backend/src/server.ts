@@ -98,7 +98,12 @@ app.listen(PORT, () => {
   console.log(`🎯 Auto Market Gen: Enabled (interval: ${process.env.AUTO_MARKET_GEN_INTERVAL_MIN || 5} min)`);
   
   // Log environment status
+  const network = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();
+  const isLocalNet = network === 'local' || network === 'localnet';
+  
   console.log('\n📋 Environment Status:');
+  console.log(`   Network: ${isLocalNet ? '🌐 LocalNet (http://localhost:4001)' : '🌍 TestNet'}`);
+  console.log(`   Custodial Wallet: ✅ (auto-funded on registration)`);
   console.log(`   Twitter API: ${process.env.TWITTER_BEARER_TOKEN ? '✅' : '❌'}`);
   console.log(`   AI API: ${(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY) ? '✅' : '❌'}`);
   console.log(`   JWT Secret: ${process.env.JWT_SECRET ? '✅' : '❌'}`);
@@ -108,6 +113,11 @@ app.listen(PORT, () => {
     console.log(`   Using: OpenRouter (Llama 3.1)`);
   } else if (process.env.OPENAI_API_KEY) {
     console.log(`   Using: OpenAI GPT-4`);
+  }
+  
+  if (isLocalNet) {
+    console.log('\n💡 Tip: To view LocalNet accounts, run: algokit localnet console');
+    console.log('         Then in the console: goal account list');
   }
 });
 

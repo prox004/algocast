@@ -1,14 +1,32 @@
 /**
  * algorand/client.js
- * Initializes and exports the algod client for Algorand TestNet.
- * Uses AlgoNode free public endpoint — no API token required.
+ * Initializes and exports the algod client for Algorand LocalNet or TestNet.
+ * - LocalNet: http://localhost:4001 (local development)
+ * - TestNet: testnet-api.algonode.cloud (testing/staging)
  */
 
 const algosdk = require('algosdk');
 
-const ALGOD_URL = process.env.ALGORAND_ALGOD_URL || 'https://testnet-api.algonode.cloud';
-const ALGOD_TOKEN = process.env.ALGORAND_ALGOD_TOKEN || '';
-const ALGOD_PORT = '';
+// Determine network from environment
+const ALGORAND_NETWORK = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();
+
+let ALGOD_URL;
+let ALGOD_TOKEN;
+let ALGOD_PORT;
+
+if (ALGORAND_NETWORK === 'local' || ALGORAND_NETWORK === 'localnet') {
+  // LocalNet configuration
+  ALGOD_URL = process.env.ALGORAND_ALGOD_URL || 'http://localhost:4001';
+  ALGOD_TOKEN = process.env.ALGORAND_ALGOD_TOKEN || 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  ALGOD_PORT = '';
+  console.log('[algod] Using LocalNet:', ALGOD_URL);
+} else {
+  // TestNet configuration (default)
+  ALGOD_URL = process.env.ALGORAND_ALGOD_URL || 'https://testnet-api.algonode.cloud';
+  ALGOD_TOKEN = process.env.ALGORAND_ALGOD_TOKEN || '';
+  ALGOD_PORT = '';
+  console.log('[algod] Using TestNet:', ALGOD_URL);
+}
 
 let _client = null;
 
