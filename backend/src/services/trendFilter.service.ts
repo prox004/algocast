@@ -3,6 +3,9 @@ interface TrendData {
   volume: number;
   url: string;
   timestamp: number;
+  tweet_id?: string;
+  tweet_author?: string;
+  tweet_content?: string;
 }
 
 interface FilteredTrend {
@@ -11,6 +14,9 @@ interface FilteredTrend {
   category: string;
   relevanceScore: number;
   isEventBased: boolean;
+  tweet_id?: string;
+  tweet_author?: string;
+  tweet_content?: string;
 }
 
 export class TrendFilterService {
@@ -34,17 +40,21 @@ export class TrendFilterService {
   ];
 
   filterTrends(trends: TrendData[]): FilteredTrend[] {
-    // Special hackathon mode: Accept ALL tweets from @ptoybuilds
-    const ptoyTrends = trends.filter(t => t.trend.toLowerCase().includes('@ptoybuilds'));
+    // Accept ALL tweets from monitored influencer accounts (they start with @)
+    // These are pre-vetted accounts so we bypass volume/keyword filters
+    const influencerTrends = trends.filter(t => t.trend.startsWith('@'));
     
-    if (ptoyTrends.length > 0) {
-      console.log(`[TrendFilter] 🎯 HACKATHON MODE: Found ${ptoyTrends.length} tweets from @ptoybuilds - bypassing all filters`);
-      return ptoyTrends.map(trend => ({
+    if (influencerTrends.length > 0) {
+      console.log(`[TrendFilter] 🎯 Found ${influencerTrends.length} tweets from monitored influencers - bypassing filters`);
+      return influencerTrends.map(trend => ({
         trend: trend.trend,
         volume: trend.volume || 1000, // Give it a default volume
         category: this.detectCategory(trend.trend),
         relevanceScore: 100, // Maximum priority
-        isEventBased: true // Always treat as event-based
+        isEventBased: true, // Always treat as event-based
+        tweet_id: (trend as any).tweet_id,
+        tweet_author: (trend as any).tweet_author,
+        tweet_content: (trend as any).tweet_content,
       }));
     }
     
@@ -139,7 +149,10 @@ export class TrendFilterService {
       volume: trend.volume,
       category,
       relevanceScore,
-      isEventBased
+      isEventBased,
+      tweet_id: (trend as any).tweet_id,
+      tweet_author: (trend as any).tweet_author,
+      tweet_content: (trend as any).tweet_content,
     };
   }
 

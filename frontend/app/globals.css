@@ -42,3 +42,12 @@ body {
     padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
   }
 }
+
+/* Hide scrollbar for category tabs */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

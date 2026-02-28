@@ -48,6 +48,7 @@ sqlite.exec(`
     question TEXT NOT NULL,
     expiry INTEGER NOT NULL,
     data_source TEXT,
+    category TEXT DEFAULT 'general',
     ai_probability REAL,
     market_probability REAL,
     yes_reserve INTEGER DEFAULT 0,
@@ -63,6 +64,7 @@ sqlite.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_markets_status ON markets(status);
   CREATE INDEX IF NOT EXISTS idx_markets_expiry ON markets(expiry);
+  CREATE INDEX IF NOT EXISTS idx_markets_category ON markets(category);
 
   CREATE TABLE IF NOT EXISTS trades (
     id TEXT PRIMARY KEY,
@@ -95,6 +97,18 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_claims_market ON claims(market_id);
 `);
 
+// ── Migrations ──────────────────────────────────────────────────────────────
+// Safely add 'category' column for existing databases that don't have it yet
+try {
+  const cols = sqlite.pragma('table_info(markets)').map((c) => c.name);
+  if (!cols.includes('category')) {
+    sqlite.exec(`ALTER TABLE markets ADD COLUMN category TEXT DEFAULT 'general'`);
+    console.log('[SQLite] Migration: added "category" column to markets');
+  }
+} catch (err) {
+  // Column already exists or table doesn't exist yet — both are fine
+}
+
 // ── Prepared Statements ─────────────────────────────────────────────────────
 
 const statements = {
@@ -115,10 +129,10 @@ const statements = {
 
   // Markets
   insertMarket: sqlite.prepare(`
-    INSERT INTO markets (id, question, expiry, data_source, ai_probability, market_probability, 
+    INSERT INTO markets (id, question, expiry, data_source, category, ai_probability, market_probability, 
                          yes_reserve, no_reserve, yes_asa_id, no_asa_id, app_id, app_address, 
                          outcome, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getMarketById: sqlite.prepare('SELECT * FROM markets WHERE id = ?'),
   getAllMarkets: sqlite.prepare('SELECT * FROM markets ORDER BY created_at DESC'),
@@ -208,6 +222,7 @@ const db = {
         market.question,
         market.expiry,
         market.data_source || null,
+        market.category || 'general',
         market.ai_probability || null,
         market.market_probability || 0.5,
         market.yes_reserve || 0,

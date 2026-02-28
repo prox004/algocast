@@ -23,12 +23,43 @@ export class MarketAgent {
   private probabilityService: ProbabilityService;
   private advisorService: AdvisorService;
 
-  constructor() {
-    this.twitterService = new TwitterService();
+  /**
+   * Set of tweet IDs that have already been processed into markets.
+   * Prevents the same tweet from generating duplicate markets across cycles.
+   */
+  private processedTweetIds: Set<string> = new Set();
+
+  constructor(twitterService?: TwitterService) {
+    // Accept an existing TwitterService to preserve cursor state across cycles,
+    // or create a new one if none is provided.
+    this.twitterService = twitterService || new TwitterService();
     this.trendFilterService = new TrendFilterService();
     this.marketGeneratorService = new MarketGeneratorService();
     this.probabilityService = new ProbabilityService();
     this.advisorService = new AdvisorService();
+
+    // Pre-populate processedTweetIds from the database so we never
+    // re-process tweets that already have markets from previous runs.
+    this.loadProcessedTweetsFromDb();
+  }
+
+  /**
+   * Load tweet IDs that already have markets in the database so that
+   * a server restart doesn't cause old tweets to be reprocessed.
+   */
+  private loadProcessedTweetsFromDb(): void {
+    try {
+      const db = getDatabase();
+      const existingMarkets = db.getMarkets(undefined, 500);
+      for (const m of existingMarkets) {
+        if (m.tweet_id) {
+          this.processedTweetIds.add(m.tweet_id);
+        }
+      }
+      console.log(`[MarketAgent] Loaded ${this.processedTweetIds.size} already-processed tweet IDs from DB`);
+    } catch (err) {
+      console.warn('[MarketAgent] Could not pre-load processed tweet IDs:', err);
+    }
   }
 
   async processMarketGeneration(input?: string): Promise<AgentState> {
@@ -53,6 +84,27 @@ export class MarketAgent {
       if (state.filtered_trends.length === 0) {
         throw new Error('No marketable trends found');
       }
+
+      // Step 2.5: Remove tweets that have already been processed into markets
+      //           Match on the tweet_id that was attached in getTrends()
+      const unprocessedTrends = state.filtered_trends.filter((t: any) => {
+        // Find the original trend data to get the tweet_id
+        const original = state.trends.find(
+          (orig: any) => orig.trend === t.trend || orig.tweet_id === t.tweet_id
+        );
+        const tweetId = (t as any).tweet_id || original?.tweet_id;
+        if (tweetId && this.processedTweetIds.has(tweetId)) {
+          console.log(`[MarketAgent] ⏭️  Skipping already-processed tweet ${tweetId}`);
+          return false;
+        }
+        return true;
+      });
+
+      if (unprocessedTrends.length === 0) {
+        throw new Error('All fetched tweets have already been processed into markets');
+      }
+
+      state.filtered_trends = unprocessedTrends;
 
       // Step 3: Generate market
       state.step = 'generating_market';
@@ -193,6 +245,10 @@ export class MarketAgent {
       };
 
       db.saveMarket(storedMarket);
+      // Track this tweet as processed so it won't generate another market
+      if (trend.tweet_id) {
+        this.processedTweetIds.add(trend.tweet_id);
+      }
       console.log(`[MarketAgent] ✅ Saved market to database: ${storedMarket.id}`);
     } catch (error) {
       console.error('[MarketAgent] Failed to save market to database:', error);

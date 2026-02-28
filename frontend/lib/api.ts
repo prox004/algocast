@@ -93,6 +93,8 @@ export interface Market {
   id: string;
   question: string;
   expiry: number;
+  category?: string;
+  data_source?: string;
   ai_probability: number;
   market_probability: number;
   yes_asa_id: number | null;

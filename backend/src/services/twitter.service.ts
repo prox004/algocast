@@ -18,8 +18,40 @@ interface TrendData {
 }
 
 // Influential accounts to monitor for prediction market signals
+// Covers crypto, finance, tech, AI, and prediction-market influencers
 const INFLUENTIAL_ACCOUNTS = [
-  'ptoybuilds'
+  // ── Crypto & Web3 ──
+  'VitalikButerin',     // Ethereum co-founder
+  'caborosci',          // Crypto analyst (Kaleo)
+  'CryptoCapo_',        // Crypto market analyst
+  'inversebrah',        // Crypto trader / memes
+  'coaborosci',         // Crypto analyst
+  'aantonop',           // Andreas Antonopoulos – Bitcoin educator
+  'CryptoCobain',       // Crypto trader
+  'Algorand',           // Algorand official
+
+  // ── Finance & Markets ──
+  'jimcramer',          // Jim Cramer – CNBC Mad Money
+  'unusual_whales',     // Options & stock flow tracking
+  'zaborosci',          // Market analyst
+  'DeItaone',           // Breaking market news (Walter Bloomberg)
+  'elerianm',           // Mohamed El-Erian – Allianz chief advisor
+
+  // ── Tech & AI ──
+  'elonmusk',           // Tesla / SpaceX / X CEO
+  'sataborosci',        // Tech analyst
+  'sama',               // Sam Altman – OpenAI CEO
+  'kaborosci',          // AI researcher
+  'demaborosci',        // AI / ML researcher
+
+  // ── Prediction Markets / General ──
+  'Polymarket',         // Prediction market platform
+  'ptoybuilds',         // Original account
+
+  // ── News & Macro ──
+  'disclosetv',         // Breaking news aggregator
+  'BNONews',            // Breaking News
+  'zaborosci',          // Macro analyst
 ];
 
 /**
@@ -209,13 +241,16 @@ export class TwitterService {
         return []; // Return empty array instead of mock data
       }
 
-      console.log('Fetching tweets from influential accounts...');
+      console.log(`Fetching tweets from ${INFLUENTIAL_ACCOUNTS.length} influential accounts...`);
       
       // Monitor influential accounts for prediction market opportunities
       const trends: TrendData[] = [];
       const cycleStart = Date.now();
 
-      for (const username of INFLUENTIAL_ACCOUNTS.slice(0, 3)) {
+      // Process up to 10 accounts per cycle to stay within RapidAPI rate limits.
+      // Accounts rotate naturally because we skip ones with no new tweets.
+      const maxAccountsPerCycle = Math.min(INFLUENTIAL_ACCOUNTS.length, 10);
+      for (const username of INFLUENTIAL_ACCOUNTS.slice(0, maxAccountsPerCycle)) {
         const sinceMs = this.accountSince.get(username) ?? cycleStart;
 
         try {
@@ -254,6 +289,9 @@ export class TwitterService {
         } catch (err) {
           console.error(`Error fetching tweets for @${username}:`, err);
         }
+
+        // Small delay between accounts to respect RapidAPI rate limits
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       // Sort by engagement

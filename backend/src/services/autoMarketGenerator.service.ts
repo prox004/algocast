@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { spawn, spawnSync } from 'child_process';
 import * as path from 'path';
 import { MarketAgent } from '../agents/marketAgent';
+import { TwitterService } from './twitter.service';
 
 // ── Python executable resolver ─────────────────────────────────────────────────
 
@@ -178,11 +179,20 @@ function deployMarketOnChain(question: string, closeTs: number): Promise<Deploym
 export class AutoMarketGeneratorService {
   private marketAgent: MarketAgent;
   private generatedQuestions: Set<string> = new Set();
+  /**
+   * Tracks tweet IDs that have already been turned into markets.
+   * Prevents the same tweet from being deployed on-chain again if
+   * the Twitter API returns it in a subsequent cycle.
+   */
+  private processedTweetIds: Set<string> = new Set();
   private isRunning = false;
   private intervalId: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.marketAgent = new MarketAgent();
+    // Share a single TwitterService instance so the cursor (accountSince)
+    // persists across cycles and old tweets are never re-fetched.
+    const sharedTwitterService = new TwitterService();
+    this.marketAgent = new MarketAgent(sharedTwitterService);
     this.loadExistingMarkets();
   }
 
@@ -240,14 +250,14 @@ export class AutoMarketGeneratorService {
   }
 
   /**
-   * Single generation cycle
+   * Single generation cycle — processes ALL new tweets found in this cycle
    */
   private async generateOnce() {
     try {
       console.log('\n🔄 [AutoMarketGen] Starting cycle...');
-      console.log('   Looking for REAL tweets from @ptoybuilds...');
+      console.log('   Scanning tweets from monitored influencers...');
 
-      // Get up to 3 markets from current trends
+      // Get markets from current trends
       const result = await this.marketAgent.processMarketGeneration();
 
       if (result.error) {
@@ -264,10 +274,24 @@ export class AutoMarketGeneratorService {
       const probability = result.probability_estimate;
       const advisory = result.advisor_analysis;
 
+      // Extract tweet_id and category from the trend data that generated this market
+      const topTrend = result.filtered_trends?.[0] || result.trends?.[0];
+      const tweetId = topTrend?.tweet_id;
+      const category = topTrend?.category || 'general';
+
       console.log('✅ [AutoMarketGen] Market generated from REAL tweet!');
       console.log(`   Question: "${market.question}"`);
+      if (tweetId) {
+        console.log(`   Tweet ID: ${tweetId}`);
+      }
 
-      // Check for duplicate
+      // Check for duplicate by tweet ID first (most reliable)
+      if (tweetId && this.processedTweetIds.has(tweetId)) {
+        console.log(`⏭️  [AutoMarketGen] Tweet ${tweetId} already processed into a market, skipping`);
+        return;
+      }
+
+      // Check for duplicate by question text
       if (this.generatedQuestions.has(market.question)) {
         console.log('⏭️  [AutoMarketGen] Question already exists, skipping');
         return;
@@ -307,6 +331,7 @@ export class AutoMarketGeneratorService {
         id: uuidv4(),
         question: market.question,
         expiry: expiryTs,
+        category: category,
         ai_probability: probability?.probability || 0.5,
         yes_asa_id:  deployment.yes_asa_id,
         no_asa_id:   deployment.no_asa_id,
@@ -323,11 +348,15 @@ export class AutoMarketGeneratorService {
       });
 
       this.generatedQuestions.add(market.question);
+      if (tweetId) {
+        this.processedTweetIds.add(tweetId);
+      }
 
       console.log('[AutoMarketGen] ✅ Market created:', {
         id: createdMarket.id,
         question: createdMarket.question,
         ai_probability: createdMarket.ai_probability,
+        tweet_id: tweetId || 'N/A',
       });
     } catch (err) {
       console.error('[AutoMarketGen] Error during cycle:', err instanceof Error ? err.message : String(err));

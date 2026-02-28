@@ -10,23 +10,45 @@ interface Props {
 export default function MarketCard({ market }: Props) {
   const expired = isExpired(market);
   const prob = market.market_probability ?? 0;
+  const category = market.category || 'general';
+
+  /** Map category key to a display colour */
+  const catColors: Record<string, string> = {
+    crypto: 'bg-orange-900/50 text-orange-300',
+    finance: 'bg-blue-900/50 text-blue-300',
+    technology: 'bg-cyan-900/50 text-cyan-300',
+    politics: 'bg-rose-900/50 text-rose-300',
+    sports: 'bg-green-900/50 text-green-300',
+    geopolitics: 'bg-amber-900/50 text-amber-300',
+    economy: 'bg-indigo-900/50 text-indigo-300',
+    climate: 'bg-teal-900/50 text-teal-300',
+    culture: 'bg-pink-900/50 text-pink-300',
+    elections: 'bg-red-900/50 text-red-300',
+    earnings: 'bg-violet-900/50 text-violet-300',
+  };
+  const catColor = catColors[category] || 'bg-gray-800/50 text-gray-400';
 
   return (
     <Link href={`/market/${market.id}`}>
       <div className="card hover:border-brand-500/50 cursor-pointer transition-colors h-full flex flex-col">
-        {/* Status badge */}
+        {/* Status badge row */}
         <div className="flex items-start justify-between gap-2 mb-3">
-          <span
-            className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded ${
-              market.resolved
-                ? 'bg-purple-900/60 text-purple-300'
-                : expired
-                ? 'bg-yellow-900/60 text-yellow-300'
-                : 'bg-emerald-900/60 text-emerald-300'
-            }`}
-          >
-            {market.resolved ? 'RESOLVED' : expired ? 'EXPIRED' : 'LIVE'}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded ${
+                market.resolved
+                  ? 'bg-purple-900/60 text-purple-300'
+                  : expired
+                  ? 'bg-yellow-900/60 text-yellow-300'
+                  : 'bg-emerald-900/60 text-emerald-300'
+              }`}
+            >
+              {market.resolved ? 'RESOLVED' : expired ? 'EXPIRED' : 'LIVE'}
+            </span>
+            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded capitalize ${catColor}`}>
+              {category}
+            </span>
+          </div>
           {market.resolved && (
             <span className={market.outcome === 1 ? 'badge-yes' : 'badge-no'}>
               {market.outcome === 1 ? 'YES' : 'NO'}

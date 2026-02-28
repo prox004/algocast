@@ -1,15 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { getMarkets, type Market } from '@/lib/api';
 import MarketCard from '@/components/MarketCard';
 import SwipeView from '@/components/SwipeView';
+import CategoryTabs, { type CategoryKey } from '@/components/CategoryTabs';
 
 export default function HomePage() {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [swipeMode, setSwipeMode] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<CategoryKey>('all');
 
   useEffect(() => {
     getMarkets()
@@ -18,10 +20,46 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Compute category counts from all markets
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of markets) {
+      const cat = m.category || 'general';
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+    counts['all'] = markets.length;
+    counts['trending'] = markets
+      .filter((m) => (m.yes_reserve + m.no_reserve) > 0)
+      .length;
+    counts['new'] = markets
+      .filter((m) => {
+        const age = Date.now() / 1000 - (m.expiry - 48 * 3600); // rough creation estimate
+        return m.expiry * 1000 > Date.now() && age < 24 * 3600;
+      })
+      .length;
+    return counts;
+  }, [markets]);
+
+  // Filter markets based on selected category
+  const filteredMarkets = useMemo(() => {
+    if (activeCategory === 'all') return markets;
+    if (activeCategory === 'trending') {
+      return [...markets]
+        .filter((m) => (m.yes_reserve + m.no_reserve) > 0)
+        .sort((a, b) => (b.yes_reserve + b.no_reserve) - (a.yes_reserve + a.no_reserve));
+    }
+    if (activeCategory === 'new') {
+      return [...markets]
+        .filter((m) => m.expiry * 1000 > Date.now())
+        .sort((a, b) => b.expiry - a.expiry);
+    }
+    return markets.filter((m) => (m.category || 'general') === activeCategory);
+  }, [markets, activeCategory]);
+
   return (
     <div>
       {/* Header row */}
-      <div className="mb-6 flex items-end justify-between gap-4">
+      <div className="mb-4 flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold mb-1">Prediction Markets</h1>
           <p className="text-gray-400 text-sm">AI-powered YES/NO markets on Algorand TestNet</p>
@@ -57,6 +95,15 @@ export default function HomePage() {
         )}
       </div>
 
+      {/* Category filter tabs */}
+      {!loading && markets.length > 0 && (
+        <CategoryTabs
+          active={activeCategory}
+          onChange={setActiveCategory}
+          counts={categoryCounts}
+        />
+      )}
+
       {loading && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
@@ -78,26 +125,34 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* No markets in this category */}
+      {!loading && !error && markets.length > 0 && filteredMarkets.length === 0 && (
+        <div className="card text-center text-gray-500 py-12">
+          <p className="text-base mb-1">No markets in this category yet.</p>
+          <p className="text-sm">Try a different tab or check back later!</p>
+        </div>
+      )}
+
       {/* Swipe mode — mobile only, when toggled */}
-      {!loading && markets.length > 0 && swipeMode && (
+      {!loading && filteredMarkets.length > 0 && swipeMode && (
         <div className="md:hidden">
-          <SwipeView markets={markets} />
+          <SwipeView markets={filteredMarkets} />
         </div>
       )}
 
       {/* Grid — mobile (when not in swipe mode) */}
-      {!loading && markets.length > 0 && !swipeMode && (
+      {!loading && filteredMarkets.length > 0 && !swipeMode && (
         <div className="md:hidden grid grid-cols-1 gap-4">
-          {markets.map((m) => (
+          {filteredMarkets.map((m) => (
             <MarketCard key={m.id} market={m} />
           ))}
         </div>
       )}
 
       {/* Grid — desktop always */}
-      {!loading && markets.length > 0 && (
+      {!loading && filteredMarkets.length > 0 && (
         <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {markets.map((m) => (
+          {filteredMarkets.map((m) => (
             <MarketCard key={m.id} market={m} />
           ))}
         </div>
