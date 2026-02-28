@@ -37,12 +37,17 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import algosdk
 from algosdk.v2client import algod as algod_client
+from algosdk.kmd import KMDClient
 from algosdk import transaction, mnemonic, account
 
 from app import compile_contract
 from config import (
     ALGOD_URL,
     ALGOD_TOKEN,
+    ALGOD_NETWORK,
+    KMD_URL,
+    KMD_TOKEN,
+    NETWORK,
     DEPLOYER_MNEMONIC,
     MIN_BALANCE_BUFFER,
     APPROVAL_TEAL,
@@ -59,6 +64,72 @@ from config import (
 
 def get_algod() -> algod_client.AlgodClient:
     return algod_client.AlgodClient(ALGOD_TOKEN, ALGOD_URL)
+
+
+def get_localnet_account() -> tuple[str, str]:
+    """
+    Retrieve the funded LocalNet dispenser account from KMD.
+    Returns: (private_key, address)
+    """
+    if not KMD_URL or not KMD_TOKEN:
+        raise ValueError("KMD not configured - only available for LocalNet")
+    
+    kmd = KMDClient(KMD_TOKEN, KMD_URL)
+    
+    # Get first wallet
+    wallets = kmd.list_wallets()
+    if not wallets:
+        raise ValueError("No wallets found in KMD")
+    
+    wallet_id = wallets[0]["id"]
+    wallet_name = wallets[0]["name"]
+    print(f"[i] Using KMD wallet: {wallet_name}")
+    
+    # Get wallet handle (use empty password for LocalNet default wallet)
+    wallet_handle = kmd.init_wallet_handle(wallet_id, "")
+    
+    # Get first key from wallet
+    keys = kmd.list_keys(wallet_handle)
+    if not keys:
+        raise ValueError("No keys found in wallet")
+    
+    address = keys[0]
+    
+    # Export private key
+    private_key = kmd.export_key(wallet_handle, "", address)
+    
+    # Release wallet handle
+    kmd.release_wallet_handle(wallet_handle)
+    
+    return private_key, address
+
+
+def get_deployer_credentials() -> tuple[str, str]:
+    """
+    Get deployer private key and address based on network.
+    Returns: (private_key, address)
+    """
+    if ALGOD_NETWORK == "local":
+        print("[i] Using LocalNet - retrieving dispenser account from KMD...")
+        return get_localnet_account()
+    else:
+        if not DEPLOYER_MNEMONIC:
+            raise ValueError("DEPLOYER_MNEMONIC not set in .env for TestNet")
+        private_key = mnemonic.to_private_key(DEPLOYER_MNEMONIC)
+        address = account.address_from_private_key(private_key)
+        return private_key, address
+
+
+def check_balance(algod: algod_client.AlgodClient, address: str) -> int:
+    """
+    Check account balance and print in ALGO.
+    Returns: balance in microAlgos
+    """
+    account_info = algod.account_info(address)
+    balance_microalgos = account_info.get("amount", 0)
+    balance_algos = balance_microalgos / 1_000_000
+    print(f"[i] Balance: {balance_algos:.6f} ALGO ({balance_microalgos} microAlgos)")
+    return balance_microalgos
 
 
 def compile_teal(algod: algod_client.AlgodClient, teal_src: str) -> bytes:
@@ -90,18 +161,33 @@ def deploy_market(question: str, close_ts: int) -> dict:
       5. Read YES/NO ASA IDs from global state
     Returns: { app_id, app_address, yes_asa_id, no_asa_id }
     """
-    if not DEPLOYER_MNEMONIC:
-        raise ValueError("DEPLOYER_MNEMONIC not set in .env")
-
+    # ── Network & Account Setup ────────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print(f"🌐 Network: {NETWORK.upper()} ({ALGOD_NETWORK})")
+    print(f"📡 Algod: {ALGOD_URL}")
+    print(f"{'='*60}\n")
+    
     algod = get_algod()
-    sp    = algod.suggested_params()
+    
+    # Get deployer credentials (KMD for LocalNet, mnemonic for TestNet)
+    deployer_pk, deployer_addr = get_deployer_credentials()
+    print(f"[i] Deployer: {deployer_addr}")
+    
+    # Check balance
+    balance = check_balance(algod, deployer_addr)
+    min_required = MIN_BALANCE_BUFFER + 10_000  # Buffer + fees
+    if balance < min_required:
+        raise ValueError(
+            f"Insufficient balance: {balance / 1_000_000:.6f} ALGO\n"
+            f"Required: {min_required / 1_000_000:.6f} ALGO\n"
+            f"Please fund the account: {deployer_addr}"
+        )
+    
+    print(f"\n✅ Connection confirmed - proceeding with deployment...\n")
+    
+    sp = algod.suggested_params()
     sp.fee = 1000
     sp.flat_fee = True
-
-    # Recover deployer key
-    deployer_pk   = mnemonic.to_private_key(DEPLOYER_MNEMONIC)
-    deployer_addr = account.address_from_private_key(deployer_pk)
-    print(f"[i] Deployer : {deployer_addr}")
 
     # ── Step 1: Compile ────────────────────────────────────────────────────────
     print("[1] Compiling contract...")

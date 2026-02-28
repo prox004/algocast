@@ -5,20 +5,34 @@ Reads from environment variables or falls back to TestNet defaults.
 
 import os
 
-# ── Network ────────────────────────────────────────────────────────────────────
+# ── Network Selection ──────────────────────────────────────────────────────────
 
-ALGOD_URL   = os.getenv("ALGORAND_ALGOD_URL",    "https://testnet-api.algonode.cloud")
-ALGOD_TOKEN = os.getenv("ALGORAND_ALGOD_TOKEN",  "")
-ALGOD_PORT  = os.getenv("ALGORAND_ALGOD_PORT",   "")
+ALGOD_NETWORK = os.getenv("ALGOD_NETWORK", "testnet")  # "local" or "testnet"
 
-INDEXER_URL   = os.getenv("ALGORAND_INDEXER_URL",  "https://testnet-idx.algonode.cloud")
+# LocalNet (AlgoKit) configuration
+if ALGOD_NETWORK == "local":
+    ALGOD_URL   = "http://localhost:4001"
+    ALGOD_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    KMD_URL     = "http://localhost:4002"
+    KMD_TOKEN   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    NETWORK     = "localnet"
+else:
+    # TestNet configuration
+    ALGOD_URL   = os.getenv("ALGORAND_ALGOD_URL", "https://testnet-api.algonode.cloud")
+    ALGOD_TOKEN = os.getenv("ALGORAND_ALGOD_TOKEN", "")
+    KMD_URL     = None
+    KMD_TOKEN   = None
+    NETWORK     = "testnet"
+
+ALGOD_PORT = os.getenv("ALGORAND_ALGOD_PORT", "")
+
+INDEXER_URL   = os.getenv("ALGORAND_INDEXER_URL", "https://testnet-idx.algonode.cloud")
 INDEXER_TOKEN = os.getenv("ALGORAND_INDEXER_TOKEN", "")
-
-NETWORK = os.getenv("ALGORAND_NETWORK", "testnet")
 
 # ── Deployer account ───────────────────────────────────────────────────────────
 # Mnemonic of the account that deploys contracts and controls the creator seat.
 # In production this is the server wallet (funded on TestNet).
+# For LocalNet, this will be retrieved from KMD automatically.
 
 DEPLOYER_MNEMONIC = os.getenv("DEPLOYER_MNEMONIC", "")
 
