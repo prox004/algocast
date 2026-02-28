@@ -95,6 +95,114 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_claims_market ON claims(market_id);
 `);
 
+// ── Database Migrations ─────────────────────────────────────────────────────
+
+// Add tweet-related columns if they don't exist
+try {
+  sqlite.prepare('SELECT tweet_id FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding tweet_id column');
+  try {
+    sqlite.exec('ALTER TABLE markets ADD COLUMN tweet_id TEXT;');
+  } catch (migErr) {
+    // Column might already exist
+  }
+}
+
+try {
+  sqlite.prepare('SELECT tweet_author FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding tweet_author column');
+  try {
+    sqlite.exec('ALTER TABLE markets ADD COLUMN tweet_author TEXT;');
+  } catch (migErr) {
+    // Column might already exist
+  }
+}
+
+try {
+  sqlite.prepare('SELECT tweet_content FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding tweet_content column');
+  try {
+    sqlite.exec('ALTER TABLE markets ADD COLUMN tweet_content TEXT;');
+  } catch (migErr) {
+    // Column might already exist
+  }
+}
+
+try {
+  sqlite.prepare('SELECT ticker FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding ticker column');
+  try {
+    sqlite.exec('ALTER TABLE markets ADD COLUMN ticker TEXT;');
+  } catch (migErr) {
+    // Column might already exist
+  }
+}
+
+try {
+  sqlite.prepare('SELECT asset_type FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding asset_type column');
+  try {
+    sqlite.exec('ALTER TABLE markets ADD COLUMN asset_type TEXT;');
+  } catch (migErr) {
+    // Column might already exist
+  }
+}
+
+// Add columns needed by DatabaseService (so both systems share one table)
+try {
+  sqlite.prepare('SELECT confidence FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding confidence column');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN confidence TEXT;'); } catch (e) {}
+}
+
+try {
+  sqlite.prepare('SELECT reasoning FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding reasoning column');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN reasoning TEXT;'); } catch (e) {}
+}
+
+try {
+  sqlite.prepare('SELECT suggested_action FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding suggested_action column');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN suggested_action TEXT;'); } catch (e) {}
+}
+
+try {
+  sqlite.prepare('SELECT result FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding result column');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN result TEXT;'); } catch (e) {}
+}
+
+try {
+  sqlite.prepare('SELECT closed_at FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding closed_at column');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN closed_at TEXT;'); } catch (e) {}
+}
+
+try {
+  sqlite.prepare('SELECT category FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding category column');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN category TEXT;'); } catch (e) {}
+}
+
+try {
+  sqlite.prepare('SELECT volume FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding volume column');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN volume INTEGER DEFAULT 0;'); } catch (e) {}
+}
+
 // ── Prepared Statements ─────────────────────────────────────────────────────
 
 const statements = {
@@ -117,8 +225,8 @@ const statements = {
   insertMarket: sqlite.prepare(`
     INSERT INTO markets (id, question, expiry, data_source, ai_probability, market_probability, 
                          yes_reserve, no_reserve, yes_asa_id, no_asa_id, app_id, app_address, 
-                         outcome, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         outcome, status, created_at, tweet_id, tweet_author, tweet_content, ticker, asset_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getMarketById: sqlite.prepare('SELECT * FROM markets WHERE id = ?'),
   getAllMarkets: sqlite.prepare('SELECT * FROM markets ORDER BY created_at DESC'),
@@ -218,7 +326,12 @@ const db = {
         market.app_address || null,
         market.outcome || null,
         market.status || 'active',
-        Date.now()
+        Date.now(),
+        market.tweet_id || null,
+        market.tweet_author || null,
+        market.tweet_content || null,
+        market.ticker || null,
+        market.asset_type || null
       );
       return market;
     } catch (err) {

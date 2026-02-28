@@ -109,6 +109,38 @@ export default function MarketDetailPage() {
           </span>
         </div>
 
+        {/* Tweet Source Info */}
+        {market.tweet_author && (
+          <div className="mb-4 p-3 bg-blue-950/40 border border-blue-700/30 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">Source:</span>
+                <a
+                  href={`https://x.com/${market.tweet_author}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  @{market.tweet_author}
+                </a>
+              </div>
+              {market.tweet_id && (
+                <a
+                  href={`https://x.com/i/web/status/${market.tweet_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors underline"
+                >
+                  View Tweet
+                </a>
+              )}
+            </div>
+            {market.tweet_content && (
+              <p className="text-xs text-gray-400 mt-2 italic line-clamp-3">&ldquo;{market.tweet_content}&rdquo;</p>
+            )}
+          </div>
+        )}
+
         {/* Ticker & Real-time Price Display */}
         {market.ticker && currentPrice && (
           <div className="mb-4 p-3 bg-gradient-to-r from-cyan-900/20 to-blue-900/20 border border-cyan-700/30 rounded-lg">

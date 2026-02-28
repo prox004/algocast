@@ -33,6 +33,38 @@ const auth = (req: any, res: any, next: any) => {
 
 const db = require('../db');
 
+// GET /analysis/:market_id - Get AI analysis for specific market
+router.get('/analysis/:market_id', async (req, res) => {
+  try {
+    const marketId = req.params.market_id;
+    const market = db.getMarketById(marketId);
+    
+    if (!market) {
+      return res.status(404).json({
+        success: false,
+        error: `Market ${marketId} not found`,
+      });
+    }
+
+    // Return AI analysis based on market data
+    const analysis = {
+      market_id: marketId,
+      ai_probability: market.ai_probability || 0.5,
+      sentiment: market.ai_probability > 0.65 ? 'BULLISH' : market.ai_probability < 0.35 ? 'BEARISH' : 'NEUTRAL',
+      summary: market.reasoning || `Based on market data, the AI estimates a ${(market.ai_probability * 100).toFixed(1)}% probability of YES outcome. This assessment incorporates current market sentiment and available trend data.`,
+    };
+    
+    res.json(analysis);
+  } catch (error) {
+    console.error('AI analysis error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get AI analysis',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // GET /sentiment/:market_id — Real-time news sentiment for a market
 router.get('/sentiment/:market_id', async (req, res) => {
   try {
@@ -54,7 +86,8 @@ router.get('/sentiment/:market_id', async (req, res) => {
       market.market_probability ?? 0.5,
     );
 
-    return res.json({ success: true, ...result });
+    // Return the sentiment result directly - it already has the right structure
+    return res.json(result);
   } catch (error) {
     console.error('[Sentiment] Endpoint error:', error);
     return res.status(500).json({

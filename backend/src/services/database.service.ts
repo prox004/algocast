@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 
 export interface StoredMarket {
   id: string;
@@ -34,7 +35,22 @@ export class DatabaseService {
   private db: Database.Database;
 
   constructor(dbPath?: string) {
-    const finalPath = dbPath || path.join(process.cwd(), 'markets.db');
+    let finalPath: string;
+    
+    if (dbPath) {
+      finalPath = dbPath;
+    } else {
+      // Must match db.js path: path.join(__dirname, '../../data')
+      // db.js __dirname = backend/src, so ../../data = AlgoCast/data
+      // Our __dirname = backend/src/services, so we need ../../../data = AlgoCast/data
+      const DATA_DIR = path.join(__dirname, '..', '..', '..', 'data');
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      finalPath = path.join(DATA_DIR, 'castalgo.db');
+    }
+    
+    console.log(`[DatabaseService] Using database at: ${finalPath}`);
     this.db = new Database(finalPath);
     this.initializeSchema();
   }
@@ -353,7 +369,9 @@ export class DatabaseService {
       tweet_author: row.tweet_author,
       tweet_content: row.tweet_content,
       category: row.category,
-      volume: row.volume
+      volume: row.volume,
+      ticker: row.ticker,
+      asset_type: row.asset_type
     };
   }
 

@@ -105,6 +105,9 @@ export interface Market {
   outcome: 0 | 1 | null;
   ticker?: string | null;
   asset_type?: 'stock' | 'crypto' | 'commodity' | null;
+  tweet_id?: string | null;
+  tweet_author?: string | null;
+  tweet_content?: string | null;
 }
 
 export interface Trade {
