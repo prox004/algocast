@@ -104,7 +104,7 @@ def deploy_market(question: str, close_ts: int) -> dict:
     print(f"[i] Deployer : {deployer_addr}")
 
     # ── Step 1: Compile ────────────────────────────────────────────────────────
-    print("[1] Compiling contract…")
+    print("[1] Compiling contract...")
     compile_contract()
 
     with open(APPROVAL_TEAL) as f:
@@ -119,7 +119,7 @@ def deploy_market(question: str, close_ts: int) -> dict:
 
     # ── Step 2: Bare ApplicationCreate ────────────────────────────────────────
     # No ABI method in this txn; create_market called separately after funding.
-    print("[2] Creating application (bare create)…")
+    print("[2] Creating application (bare create)...")
     create_txn = transaction.ApplicationCreateTxn(
         sender=deployer_addr,
         sp=sp,
@@ -157,10 +157,10 @@ def deploy_market(question: str, close_ts: int) -> dict:
     signed_fund = fund_txn.sign(deployer_pk)
     fund_txid   = algod.send_transaction(signed_fund)
     wait_for_confirmation(algod, fund_txid)
-    print(f"[OK] Funded {MIN_BALANCE_BUFFER} microAlgos → {app_address}")
+    print(f"[OK] Funded {MIN_BALANCE_BUFFER} microAlgos -> {app_address}")
 
     # ── Step 4: Call create_market() ABI method ──────────────────────────────
-    print("[4] Calling create_market()…")
+    print("[4] Calling create_market()...")
     # Fee = 1 outer + 2 inner txns (YES ASA + NO ASA) = 3000 microAlgos
     sp_init = algod.suggested_params()
     sp_init.fee      = 3000
@@ -247,7 +247,7 @@ def register_market_with_backend(deployment: dict, backend_url: str, token: str)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read())
-            print(f"\n[OK] Market registered — backend id: {body['market']['id']}")
+            print(f"\n[OK] Market registered - backend id: {body['market']['id']}")
     except urllib.error.HTTPError as e:
         print(f"\n[WARN] Backend registration failed ({e.code}): {e.read().decode()}")
         print("       Register manually: POST /markets/generate with the deployment JSON above.")

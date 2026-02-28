@@ -14,33 +14,66 @@ interface TrendData {
   timestamp: number;
 }
 
+// Influential accounts to monitor for prediction market signals
+const INFLUENTIAL_ACCOUNTS = [
+  'ptoybuilds', 'elonmusk', 'VitalikButerin', 'cz_binance', 'SBF_FTX', 'APompliano'
+];
+
+/**
+ * Parse a Twitter date string ("Sat Feb 28 12:34:56 +0000 2026") to a Unix ms timestamp.
+ * Returns 0 if parsing fails.
+ */
+function parseTwitterDate(dateStr: string): number {
+  if (!dateStr) return 0;
+  const ms = Date.parse(dateStr);
+  return isNaN(ms) ? 0 : ms;
+}
+
 export class TwitterService {
   private client?: TwitterApi;
   private rapidApiKey?: string;
 
+  /**
+   * Per-account cursor: only tweets whose created_at is AFTER this timestamp
+   * (Unix ms) will be returned.
+   * Initialised to Date.now() at service startup so we never replay old posts.
+   */
+  private accountSince: Map<string, number> = new Map();
+
   constructor() {
     const bearerToken = process.env.TWITTER_BEARER_TOKEN;
     this.rapidApiKey = process.env.RAPIDAPI_KEY;
-    
+
     console.log('TwitterService constructor - Bearer token present:', !!bearerToken);
     console.log('TwitterService constructor - RapidAPI key present:', !!this.rapidApiKey);
-    
+
     if (bearerToken) {
       this.client = new TwitterApi(bearerToken);
       console.log('Twitter client initialized successfully');
     } else {
       console.warn('TWITTER_BEARER_TOKEN not set, using mock data only');
     }
+
+    // Baseline all accounts to NOW so the first poll only catches future tweets
+    const now = Date.now();
+    for (const account of INFLUENTIAL_ACCOUNTS) {
+      this.accountSince.set(account, now);
+    }
+    console.log(`[TwitterService] Cursors initialised at ${new Date(now).toISOString()} for ${INFLUENTIAL_ACCOUNTS.length} accounts`);
   }
 
-  async getUserLatestTweets(username: string, maxResults: number = 10) {
+  /**
+   * Fetch tweets from a user posted strictly after `sinceMs` (Unix ms).
+   * Returns at most `maxResults` tweets sorted newest-first.
+   */
+  async getUserLatestTweets(username: string, maxResults: number = 10, sinceMs: number = 0) {
     try {
       if (!this.rapidApiKey) {
         console.log('No RapidAPI key available');
         return [];
       }
 
-      console.log(`Fetching tweets for @${username} via RapidAPI...`);
+      console.log(`Fetching tweets for @${username} via RapidAPI (since ${new Date(sinceMs).toISOString()})...`);
       
       // Try user timeline endpoint first
       try {
@@ -55,10 +88,13 @@ export class TwitterService {
         });
 
         if (timelineResponse.data && timelineResponse.data.timeline) {
-          const tweets = timelineResponse.data.timeline;
-          console.log(`Fetched ${tweets.length} tweets from @${username}'s timeline`);
-          
-          return tweets.slice(0, maxResults).map((tweet: any) => ({
+          const allTweets = timelineResponse.data.timeline;
+          const newTweets = allTweets.filter(
+            (t: any) => parseTwitterDate(t.created_at) > sinceMs
+          );
+          console.log(`@${username} timeline: ${allTweets.length} total, ${newTweets.length} new since cursor`);
+
+          return newTweets.slice(0, maxResults).map((tweet: any) => ({
             id: tweet.tweet_id || tweet.id_str,
             text: tweet.text || tweet.full_text,
             created_at: tweet.created_at,
@@ -91,10 +127,13 @@ export class TwitterService {
         });
 
         if (searchResponse.data && searchResponse.data.timeline) {
-          const tweets = searchResponse.data.timeline;
-          console.log(`Found ${tweets.length} tweets from @${username} via search`);
-          
-          return tweets.slice(0, maxResults).map((tweet: any) => ({
+          const allTweets = searchResponse.data.timeline;
+          const newTweets = allTweets.filter(
+            (t: any) => parseTwitterDate(t.created_at) > sinceMs
+          );
+          console.log(`@${username} search: ${allTweets.length} total, ${newTweets.length} new since cursor`);
+
+          return newTweets.slice(0, maxResults).map((tweet: any) => ({
             id: tweet.tweet_id || tweet.id_str,
             text: tweet.text || tweet.full_text,
             created_at: tweet.created_at,
@@ -130,11 +169,13 @@ export class TwitterService {
       let posts = trendingResponse.data?.timeline || [];
       const filteredPosts = posts.filter((post: any) => {
         const postUsername = post.screen_name || post.user?.screen_name;
-        return postUsername && postUsername.toLowerCase() === username.toLowerCase();
+        const matchesUser = postUsername && postUsername.toLowerCase() === username.toLowerCase();
+        const isNew = parseTwitterDate(post.created_at) > sinceMs;
+        return matchesUser && isNew;
       });
-      
-      console.log(`Found ${filteredPosts.length} posts from @${username} in trending`);
-      
+
+      console.log(`Found ${filteredPosts.length} new posts from @${username} in trending (since cursor)`);
+
       return filteredPosts.slice(0, maxResults).map((post: any) => ({
         id: post.tweet_id || post.id_str,
         text: post.text || post.full_text,
@@ -166,35 +207,49 @@ export class TwitterService {
       console.log('Fetching tweets from influential accounts...');
       
       // Monitor influential accounts for prediction market opportunities
-      const influentialAccounts = ['elonmusk', 'VitalikButerin', 'cz_binance', 'SBF_FTX', 'APompliano'];
       const trends: TrendData[] = [];
-      
-      for (const username of influentialAccounts.slice(0, 3)) {
+      const cycleStart = Date.now();
+
+      for (const username of INFLUENTIAL_ACCOUNTS.slice(0, 3)) {
+        const sinceMs = this.accountSince.get(username) ?? cycleStart;
+
         try {
-          const tweets = await this.getUserLatestTweets(username, 5);
-          
+          const tweets = await this.getUserLatestTweets(username, 5, sinceMs);
+
           if (tweets.length > 0) {
             const latestTweet = tweets[0];
             const metrics = (latestTweet as any).public_metrics;
-            const engagement = metrics ? 
-              metrics.like_count + metrics.retweet_count + metrics.reply_count : 0;
-            
+            const engagement = metrics
+              ? metrics.like_count + metrics.retweet_count + metrics.reply_count
+              : 0;
+
+            // Advance cursor to the newest tweet's timestamp so duplicates are never replayed
+            const newestTs = Math.max(
+              ...tweets.map((t: any) => parseTwitterDate(t.created_at))
+            );
+            if (newestTs > sinceMs) {
+              this.accountSince.set(username, newestTs);
+              console.log(`[TwitterService] Cursor for @${username} advanced to ${new Date(newestTs).toISOString()}`);
+            }
+
             trends.push({
-              trend: `@${username}: ${(latestTweet.text || '').substring(0, 50)}...`,
+              trend: `@${username}: ${((latestTweet as any).text || '').substring(0, 50)}...`,
               volume: engagement,
               url: `https://twitter.com/${username}`,
-              timestamp: Date.now()
+              timestamp: cycleStart,
             });
+          } else {
+            console.log(`[TwitterService] No new tweets from @${username} since cursor`);
           }
         } catch (err) {
           console.error(`Error fetching tweets for @${username}:`, err);
         }
       }
-      
+
       // Sort by engagement
       const sortedTrends = trends.sort((a, b) => b.volume - a.volume);
-      console.log(`Fetched ${sortedTrends.length} real tweet-based trends`);
-      
+      console.log(`Fetched ${sortedTrends.length} new tweet-based trends this cycle`);
+
       return sortedTrends.length > 0 ? sortedTrends : this.getMockTrends();
     } catch (error) {
       console.error('Error fetching Twitter trends:', error);

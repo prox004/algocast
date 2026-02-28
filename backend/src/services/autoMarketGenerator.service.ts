@@ -1,7 +1,139 @@
 import { v4 as uuidv4 } from 'uuid';
+import { spawn, spawnSync } from 'child_process';
+import * as path from 'path';
 import { MarketAgent } from '../agents/marketAgent';
 
+// ── Python executable resolver ─────────────────────────────────────────────────
+
+/**
+ * Finds the first Python executable that actually works on this machine.
+ * Returns a full absolute path so spawn() can call it directly without shell.
+ * Order of preference: PYTHON_CMD env var → known absolute paths → PATH names.
+ */
+function resolvePython(): string {
+  if (process.env.PYTHON_CMD) return process.env.PYTHON_CMD;
+
+  // Full absolute paths first — these work without shell:true on Windows
+  const candidates = [
+    'C:\\Windows\\py.exe',            // Windows py launcher
+    'C:\\Python313\\python.exe',      // Python 3.13 install on this machine
+    'C:\\Python312\\python.exe',
+    'C:\\Python311\\python.exe',
+    'C:\\Python310\\python.exe',
+    // Per-user installs
+    `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python313\\python.exe`,
+    `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python312\\python.exe`,
+    `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python311\\python.exe`,
+    // PATH-based names (fallback — work only if PATH is inherited)
+    'py',
+    'python3',
+    'python',
+  ];
+
+  for (const cmd of candidates) {
+    if (!cmd) continue; // guard against undefined env vars
+    try {
+      const result = spawnSync(cmd, ['--version'], { timeout: 3000 });
+      if (result.status === 0) {
+        console.log(`[AutoMarketGen] Using Python: ${cmd}`);
+        return cmd;
+      }
+    } catch {
+      // try next
+    }
+  }
+
+  throw new Error(
+    'Python not found. Install Python 3 and ensure it is on PATH, or set PYTHON_CMD in backend/.env'
+  );
+}
+
+let _pythonCmd: string | null = null;
+function getPythonCmd(): string {
+  if (!_pythonCmd) _pythonCmd = resolvePython();
+  return _pythonCmd;
+}
+
 const db = require('../db');
+
+// ── On-chain deployment helper ─────────────────────────────────────────────────
+
+interface DeploymentResult {
+  app_id: number;
+  app_address: string;
+  yes_asa_id: number;
+  no_asa_id: number;
+}
+
+/**
+ * Spawns deploy.py to create a real Algorand smart contract + YES/NO ASAs.
+ * Returns the deployment info parsed from deploy.py's JSON output.
+ */
+function deployMarketOnChain(question: string, closeTs: number): Promise<DeploymentResult> {
+  return new Promise((resolve, reject) => {
+    // Works whether running via ts-node (src/services/) or compiled (dist/services/)
+    // Both are 3 levels below the project root → ../../../contracts
+    const contractsDir = path.resolve(__dirname, '../../../contracts');
+    const scriptPath   = path.join(contractsDir, 'deploy.py');
+
+    let pythonCmd: string;
+    try {
+      pythonCmd = getPythonCmd();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
+    // shell: false (default) - arguments with spaces are passed as-is to Python,
+    // no shell quoting/splitting issues. Requires pythonCmd to be a full absolute path.
+    // PYTHONIOENCODING=utf-8 ensures Python stdout/stderr use UTF-8 regardless of
+    // the Windows console codepage (cp1252) so Unicode chars in print() don't crash.
+    const proc = spawn(
+      pythonCmd,
+      [scriptPath, '--question', question, '--close-ts', String(closeTs)],
+      {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+        cwd: contractsDir,
+      }
+    );
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn deploy.py: ${err.message}`));
+    });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`deploy.py exited with code ${code}. stderr: ${stderr.trim()}`));
+        return;
+      }
+
+      // deploy.py prints "Deployment summary:\n<json>" at the end
+      const summaryIdx = stdout.indexOf('Deployment summary:');
+      if (summaryIdx === -1) {
+        reject(new Error(`deploy.py did not print "Deployment summary:". stdout: ${stdout.trim()}`));
+        return;
+      }
+
+      try {
+        const jsonStr = stdout.slice(summaryIdx + 'Deployment summary:'.length).trim();
+        const data = JSON.parse(jsonStr) as DeploymentResult;
+        resolve(data);
+      } catch (parseErr) {
+        reject(new Error(`Failed to parse deploy.py JSON output: ${parseErr}`));
+      }
+    });
+  });
+}
 
 /**
  * AutoMarketGeneratorService
@@ -107,22 +239,49 @@ export class AutoMarketGeneratorService {
         return;
       }
 
-      // Create in DB
-      const expiryTs = market.expiry || Math.floor(Date.now() / 1000) + 48 * 3600; // 48h default
+      // market.expiry may arrive as a Unix int, a numeric string, or an ISO date string
+      const rawExpiry = market.expiry;
+      let expiryTs: number;
+      if (!rawExpiry) {
+        expiryTs = Math.floor(Date.now() / 1000) + 48 * 3600; // 48h default
+      } else if (typeof rawExpiry === 'number') {
+        expiryTs = Math.floor(rawExpiry);
+      } else {
+        // Try parsing as integer first, then as a date string
+        const asInt = parseInt(rawExpiry, 10);
+        if (!isNaN(asInt) && String(asInt) === String(rawExpiry).trim()) {
+          expiryTs = asInt;
+        } else {
+          const ms = Date.parse(rawExpiry);
+          expiryTs = isNaN(ms)
+            ? Math.floor(Date.now() / 1000) + 48 * 3600
+            : Math.floor(ms / 1000);
+        }
+      }
 
+      // Deploy on-chain: create smart contract + YES/NO ASAs
+      console.log('[AutoMarketGen] Deploying on-chain contract for:', market.question);
+      const deployment = await deployMarketOnChain(market.question, expiryTs);
+      console.log('[AutoMarketGen] On-chain deployment complete:', {
+        app_id:      deployment.app_id,
+        yes_asa_id:  deployment.yes_asa_id,
+        no_asa_id:   deployment.no_asa_id,
+      });
+
+      // Create in DB with real on-chain IDs
       const createdMarket = db.createMarket({
         id: uuidv4(),
         question: market.question,
         expiry: expiryTs,
         ai_probability: probability?.probability || 0.5,
-        yes_asa_id: null,        // Mock mode (no on-chain ASAs)
-        no_asa_id: null,
+        yes_asa_id:  deployment.yes_asa_id,
+        no_asa_id:   deployment.no_asa_id,
         yes_reserve: 0,
         no_reserve: 0,
         resolved: false,
         outcome: null,
-        app_id: null,            // Mock mode (no on-chain contract)
-        app_address: null,
+        app_id:      deployment.app_id,
+        app_address: deployment.app_address,
         data_source: market.data_source || 'Twitter',
         ai_advisory: advisory?.advice || 'HOLD',
         created_by: 'AI_AGENT',

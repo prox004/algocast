@@ -1,0 +1,551 @@
+#pragma version 8
+txn NumAppArgs
+int 0
+==
+bnz main_l12
+txna ApplicationArgs 0
+method "create_market(string,uint64)void"
+==
+bnz main_l11
+txna ApplicationArgs 0
+method "buy_yes(pay)uint64"
+==
+bnz main_l10
+txna ApplicationArgs 0
+method "buy_no(pay)uint64"
+==
+bnz main_l9
+txna ApplicationArgs 0
+method "resolve_market(uint64)void"
+==
+bnz main_l8
+txna ApplicationArgs 0
+method "claim()uint64"
+==
+bnz main_l7
+err
+main_l7:
+txn OnCompletion
+int NoOp
+==
+txn ApplicationID
+int 0
+!=
+&&
+assert
+callsub claimcaster_10
+int 1
+return
+main_l8:
+txn OnCompletion
+int NoOp
+==
+txn ApplicationID
+int 0
+!=
+&&
+assert
+callsub resolvemarketcaster_9
+int 1
+return
+main_l9:
+txn OnCompletion
+int NoOp
+==
+txn ApplicationID
+int 0
+!=
+&&
+assert
+callsub buynocaster_8
+int 1
+return
+main_l10:
+txn OnCompletion
+int NoOp
+==
+txn ApplicationID
+int 0
+!=
+&&
+assert
+callsub buyyescaster_7
+int 1
+return
+main_l11:
+txn OnCompletion
+int NoOp
+==
+txn ApplicationID
+int 0
+!=
+&&
+assert
+callsub createmarketcaster_6
+int 1
+return
+main_l12:
+txn OnCompletion
+int NoOp
+==
+bnz main_l14
+err
+main_l14:
+txn ApplicationID
+int 0
+==
+assert
+int 1
+return
+
+// tokens_for_amount
+tokensforamount_0:
+proto 1 1
+frame_dig -1
+retsub
+
+// create_market
+createmarket_1:
+proto 2 0
+byte "close_ts"
+app_global_get
+int 0
+==
+// already initialized
+assert
+frame_dig -1
+global LatestTimestamp
+>
+// close_ts must be future
+assert
+frame_dig -2
+extract 2 0
+len
+int 0
+>
+// question cannot be empty
+assert
+frame_dig -2
+extract 2 0
+len
+int 128
+<=
+// question too long
+assert
+byte "creator"
+txn Sender
+app_global_put
+byte "question"
+frame_dig -2
+extract 2 0
+app_global_put
+byte "close_ts"
+frame_dig -1
+app_global_put
+byte "yes_reserve"
+int 0
+app_global_put
+byte "no_reserve"
+int 0
+app_global_put
+byte "resolved"
+int 0
+app_global_put
+byte "outcome"
+int 0
+app_global_put
+itxn_begin
+int acfg
+itxn_field TypeEnum
+int 1000000000
+itxn_field ConfigAssetTotal
+int 0
+itxn_field ConfigAssetDecimals
+byte "CastAlgo YES"
+itxn_field ConfigAssetName
+byte "YES"
+itxn_field ConfigAssetUnitName
+global CurrentApplicationAddress
+itxn_field ConfigAssetManager
+global CurrentApplicationAddress
+itxn_field ConfigAssetReserve
+global CurrentApplicationAddress
+itxn_field ConfigAssetClawback
+global ZeroAddress
+itxn_field ConfigAssetFreeze
+int 0
+itxn_field Fee
+itxn_submit
+byte "yes_asa_id"
+itxn CreatedAssetID
+app_global_put
+itxn_begin
+int acfg
+itxn_field TypeEnum
+int 1000000000
+itxn_field ConfigAssetTotal
+int 0
+itxn_field ConfigAssetDecimals
+byte "CastAlgo NO"
+itxn_field ConfigAssetName
+byte "NO"
+itxn_field ConfigAssetUnitName
+global CurrentApplicationAddress
+itxn_field ConfigAssetManager
+global CurrentApplicationAddress
+itxn_field ConfigAssetReserve
+global CurrentApplicationAddress
+itxn_field ConfigAssetClawback
+global ZeroAddress
+itxn_field ConfigAssetFreeze
+int 0
+itxn_field Fee
+itxn_submit
+byte "no_asa_id"
+itxn CreatedAssetID
+app_global_put
+int 1
+return
+
+// buy_yes
+buyyes_2:
+proto 1 1
+int 0
+frame_dig -1
+gtxns Receiver
+global CurrentApplicationAddress
+==
+// payment must go to contract
+assert
+frame_dig -1
+gtxns Sender
+txn Sender
+==
+// payment sender must match caller
+assert
+byte "resolved"
+app_global_get
+int 0
+==
+// market already resolved
+assert
+global LatestTimestamp
+byte "close_ts"
+app_global_get
+<
+// market trading window closed
+assert
+frame_dig -1
+gtxns Amount
+int 0
+>
+// amount must be positive
+assert
+frame_dig -1
+gtxns Amount
+callsub tokensforamount_0
+store 0
+byte "yes_reserve"
+byte "yes_reserve"
+app_global_get
+frame_dig -1
+gtxns Amount
++
+app_global_put
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "yes_asa_id"
+app_global_get
+itxn_field XferAsset
+load 0
+itxn_field AssetAmount
+frame_dig -1
+gtxns Sender
+itxn_field AssetReceiver
+int 0
+itxn_field Fee
+itxn_submit
+frame_dig -1
+gtxns Amount
+frame_bury 0
+retsub
+
+// buy_no
+buyno_3:
+proto 1 1
+int 0
+frame_dig -1
+gtxns Receiver
+global CurrentApplicationAddress
+==
+// payment must go to contract
+assert
+frame_dig -1
+gtxns Sender
+txn Sender
+==
+// payment sender must match caller
+assert
+byte "resolved"
+app_global_get
+int 0
+==
+// market already resolved
+assert
+global LatestTimestamp
+byte "close_ts"
+app_global_get
+<
+// market trading window closed
+assert
+frame_dig -1
+gtxns Amount
+int 0
+>
+// amount must be positive
+assert
+frame_dig -1
+gtxns Amount
+callsub tokensforamount_0
+store 1
+byte "no_reserve"
+byte "no_reserve"
+app_global_get
+frame_dig -1
+gtxns Amount
++
+app_global_put
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "no_asa_id"
+app_global_get
+itxn_field XferAsset
+load 1
+itxn_field AssetAmount
+frame_dig -1
+gtxns Sender
+itxn_field AssetReceiver
+int 0
+itxn_field Fee
+itxn_submit
+frame_dig -1
+gtxns Amount
+frame_bury 0
+retsub
+
+// resolve_market
+resolvemarket_4:
+proto 1 0
+txn Sender
+byte "creator"
+app_global_get
+==
+// only creator may call this
+assert
+byte "resolved"
+app_global_get
+int 0
+==
+// market already resolved
+assert
+global LatestTimestamp
+byte "close_ts"
+app_global_get
+>=
+// market not expired yet
+assert
+frame_dig -1
+int 0
+==
+frame_dig -1
+int 1
+==
+||
+// outcome must be 0 or 1
+assert
+byte "resolved"
+int 1
+app_global_put
+byte "outcome"
+frame_dig -1
+app_global_put
+retsub
+
+// claim
+claim_5:
+proto 0 1
+int 0
+byte "resolved"
+app_global_get
+int 1
+==
+// market not resolved yet
+assert
+txn Sender
+byte "outcome"
+app_global_get
+int 1
+==
+bnz claim_5_l8
+byte "no_asa_id"
+app_global_get
+claim_5_l2:
+asset_holding_get AssetBalance
+store 4
+store 3
+load 4
+// claimer has no holding in winning ASA
+assert
+load 3
+int 0
+>
+// zero winning tokens held
+assert
+load 3
+store 5
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "outcome"
+app_global_get
+int 1
+==
+bnz claim_5_l7
+byte "no_asa_id"
+app_global_get
+claim_5_l4:
+itxn_field XferAsset
+load 5
+itxn_field AssetAmount
+txn Sender
+itxn_field AssetSender
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+int 0
+itxn_field Fee
+itxn_submit
+itxn_begin
+int pay
+itxn_field TypeEnum
+txn Sender
+itxn_field Receiver
+load 5
+itxn_field Amount
+int 0
+itxn_field Fee
+itxn_submit
+txn Sender
+byte "outcome"
+app_global_get
+int 1
+==
+bnz claim_5_l6
+byte "no_asa_id"
+app_global_get
+b claim_5_l9
+claim_5_l6:
+byte "yes_asa_id"
+app_global_get
+b claim_5_l9
+claim_5_l7:
+byte "yes_asa_id"
+app_global_get
+b claim_5_l4
+claim_5_l8:
+byte "yes_asa_id"
+app_global_get
+b claim_5_l2
+claim_5_l9:
+asset_holding_get AssetBalance
+store 2
+frame_bury 0
+retsub
+
+// create_market_caster
+createmarketcaster_6:
+proto 0 0
+byte ""
+int 0
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 1
+frame_dig 0
+frame_dig 1
+callsub createmarket_1
+retsub
+
+// buy_yes_caster
+buyyescaster_7:
+proto 0 0
+int 0
+dup
+txn GroupIndex
+int 1
+-
+frame_bury 1
+frame_dig 1
+gtxns TypeEnum
+int pay
+==
+assert
+frame_dig 1
+callsub buyyes_2
+frame_bury 0
+byte 0x151f7c75
+frame_dig 0
+itob
+concat
+log
+retsub
+
+// buy_no_caster
+buynocaster_8:
+proto 0 0
+int 0
+dup
+txn GroupIndex
+int 1
+-
+frame_bury 1
+frame_dig 1
+gtxns TypeEnum
+int pay
+==
+assert
+frame_dig 1
+callsub buyno_3
+frame_bury 0
+byte 0x151f7c75
+frame_dig 0
+itob
+concat
+log
+retsub
+
+// resolve_market_caster
+resolvemarketcaster_9:
+proto 0 0
+int 0
+txna ApplicationArgs 1
+btoi
+frame_bury 0
+frame_dig 0
+callsub resolvemarket_4
+retsub
+
+// claim_caster
+claimcaster_10:
+proto 0 0
+int 0
+callsub claim_5
+frame_bury 0
+byte 0x151f7c75
+frame_dig 0
+itob
+concat
+log
+retsub

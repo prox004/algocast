@@ -1,0 +1,70 @@
+{
+  "name": "CastAlgoMarket",
+  "methods": [
+    {
+      "name": "create_market",
+      "args": [
+        {
+          "type": "string",
+          "name": "question"
+        },
+        {
+          "type": "uint64",
+          "name": "close_ts"
+        }
+      ],
+      "returns": {
+        "type": "void"
+      },
+      "desc": "Called once after deployment to initialise state and mint YES/NO ASAs.\nProtected by a close_ts == 0 guard so it can never be called twice."
+    },
+    {
+      "name": "buy_yes",
+      "args": [
+        {
+          "type": "pay",
+          "name": "payment"
+        }
+      ],
+      "returns": {
+        "type": "uint64"
+      },
+      "desc": "Atomic group: [pay txn \u2192 contract] + [this app call].\nValidates payment, updates yes_reserve, sends YES tokens to buyer. Returns number of tokens issued."
+    },
+    {
+      "name": "buy_no",
+      "args": [
+        {
+          "type": "pay",
+          "name": "payment"
+        }
+      ],
+      "returns": {
+        "type": "uint64"
+      },
+      "desc": "Mirror of buy_yes for NO tokens."
+    },
+    {
+      "name": "resolve_market",
+      "args": [
+        {
+          "type": "uint64",
+          "name": "outcome"
+        }
+      ],
+      "returns": {
+        "type": "void"
+      },
+      "desc": "Called by the creator (backend) after market close_ts.\noutcome: 0 = NO wins, 1 = YES wins."
+    },
+    {
+      "name": "claim",
+      "args": [],
+      "returns": {
+        "type": "uint64"
+      },
+      "desc": "Called by the winner.  In custodial model the backend calls this on\nbehalf of the user (Txn.sender() = user's custodial address).\nBurns winning tokens via clawback and pays out ALGO 1:1. Returns payout amount in microAlgos."
+    }
+  ],
+  "networks": {}
+}
