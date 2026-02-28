@@ -1,33 +1,33 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { buyYes, buyNo, formatAlgo, type Market } from '@/lib/api';
+
+const PRESETS = [0.1, 0.5, 1, 5];
 
 interface Props {
   market: Market;
+  defaultSide?: 'YES' | 'NO';
   onTrade?: () => void;
+  onClose?: () => void;
 }
 
-export default function BuyPanel({ market, onTrade }: Props) {
-  const [amount, setAmount] = useState('');
+export default function BuyPanel({ market, defaultSide = 'YES', onTrade, onClose }: Props) {
+  const [side, setSide] = useState<'YES' | 'NO'>(defaultSide);
+  const [amount, setAmount] = useState(0.1);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const handleTrade = useCallback(() => {
-    onTrade?.();
-  }, [onTrade]);
-
-  async function handleBuy(side: 'YES' | 'NO') {
+  async function handleBuy() {
     setMsg('');
-    const micro = Math.floor(parseFloat(amount) * 1_000_000);
-    if (!micro || micro <= 0) return setMsg('Enter a valid ALGO amount');
+    if (amount <= 0) return setMsg('Enter a valid ALGO amount');
     setLoading(true);
     try {
+      const micro = Math.floor(amount * 1_000_000);
       const fn = side === 'YES' ? buyYes : buyNo;
       const res = await fn(market.id, micro);
       setMsg(`Bought ${res.tokens.toLocaleString()} ${side} tokens!`);
-      setAmount('');
-      handleTrade();
+      setTimeout(() => { onTrade?.(); }, 900);
     } catch (err: any) {
       setMsg(err.message);
     } finally {
@@ -35,61 +35,115 @@ export default function BuyPanel({ market, onTrade }: Props) {
     }
   }
 
-  const microAmount = Math.floor(parseFloat(amount || '0') * 1_000_000) || 0;
+  const micro = Math.floor(amount * 1_000_000);
   const yesProb = market.market_probability ?? 0.5;
 
   return (
-    <div className="card">
-      <h2 className="font-semibold mb-4">Buy Tokens</h2>
+    // Bottom sheet overlay
+    <div
+      className="fixed inset-0 bg-black/70 z-50 flex items-end"
+      onClick={() => !loading && onClose?.()}
+    >
+      <div
+        className="w-full bg-gray-900 border-t border-gray-800 rounded-t-2xl p-5 pb-8 safe-bottom max-w-2xl mx-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Handle */}
+        <div className="w-10 h-1 bg-gray-700 rounded-full mx-auto mb-5" />
 
-      <div className="mb-4">
-        <label className="label">Amount (ALGO)</label>
+        {/* YES / NO toggle */}
+        <div className="flex gap-2 mb-5">
+          <button
+            onClick={() => setSide('YES')}
+            className={`flex-1 py-3 rounded-xl font-bold text-base transition-colors ${
+              side === 'YES'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            Buy YES
+          </button>
+          <button
+            onClick={() => setSide('NO')}
+            className={`flex-1 py-3 rounded-xl font-bold text-base transition-colors ${
+              side === 'NO'
+                ? 'bg-red-700 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            Buy NO
+          </button>
+        </div>
+
+        {/* Current odds */}
+        <div className="flex justify-between text-sm mb-4 px-1">
+          <span className="text-gray-400">YES odds</span>
+          <span className="font-semibold">
+            <span className="text-emerald-400">{(yesProb * 100).toFixed(1)}%</span>
+            <span className="text-gray-600 mx-1">/</span>
+            <span className="text-red-400">{((1 - yesProb) * 100).toFixed(1)}%</span>
+          </span>
+        </div>
+
+        {/* Preset amounts */}
+        <div className="grid grid-cols-4 gap-2 mb-3">
+          {PRESETS.map((p) => (
+            <button
+              key={p}
+              onClick={() => setAmount(p)}
+              className={`py-3 rounded-xl text-sm font-semibold border transition-colors ${
+                amount === p
+                  ? side === 'YES'
+                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                    : 'bg-red-700 border-red-700 text-white'
+                  : 'border-gray-700 text-gray-400 hover:border-gray-500'
+              }`}
+            >
+              {p}A
+            </button>
+          ))}
+        </div>
+
+        {/* Custom input */}
         <input
           type="number"
+          className="input mb-1 text-base"
+          placeholder="Custom amount in ALGO"
           min="0"
           step="0.1"
-          className="input"
-          placeholder="0.0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          value={amount || ''}
+          onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
         />
-        {microAmount > 0 && (
-          <p className="text-xs text-gray-500 mt-1">= {formatAlgo(microAmount)}</p>
+        {micro > 0 && (
+          <p className="text-xs text-gray-600 mb-4 px-1">{formatAlgo(micro)}</p>
         )}
-      </div>
 
-      {/* Probability preview */}
-      {microAmount > 0 && (
-        <div className="bg-gray-800/60 rounded-lg px-3 py-2 text-xs text-gray-400 mb-4 space-y-1">
-          <div className="flex justify-between">
-            <span>Tokens received (1:1)</span>
-            <span>{microAmount.toLocaleString()} tokens</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Current YES probability</span>
-            <span className="text-emerald-400">{(yesProb * 100).toFixed(1)}%</span>
-          </div>
-        </div>
-      )}
+        {msg && (
+          <p className={`text-sm mb-3 text-center ${
+            msg.startsWith('Bought') ? 'text-emerald-400' : 'text-red-400'
+          }`}>{msg}</p>
+        )}
 
-      <div className="grid grid-cols-2 gap-3">
+        {/* Confirm button */}
         <button
-          onClick={() => handleBuy('YES')}
-          disabled={loading}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+          onClick={handleBuy}
+          disabled={loading || amount <= 0}
+          className={`w-full py-4 rounded-xl font-bold text-base transition-colors disabled:opacity-50 ${
+            side === 'YES'
+              ? 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700'
+              : 'bg-red-700 hover:bg-red-600 active:bg-red-800'
+          }`}
         >
-          Buy YES
+          {loading ? 'Processing...' : `Confirm ${side} — ${amount} ALGO`}
         </button>
+
         <button
-          onClick={() => handleBuy('NO')}
-          disabled={loading}
-          className="bg-red-700 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+          onClick={() => onClose?.()}
+          className="w-full py-3 mt-2 text-gray-500 text-sm"
         >
-          Buy NO
+          Cancel
         </button>
       </div>
-
-      {msg && <p className="text-sm mt-3 text-gray-300">{msg}</p>}
     </div>
   );
 }

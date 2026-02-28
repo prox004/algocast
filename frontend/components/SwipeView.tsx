@@ -15,13 +15,16 @@ export default function SwipeView({ markets }: Props) {
   const router = useRouter();
   const [done, setDone] = useState<Set<string>>(new Set());
   const [dragX, setDragX] = useState(0);
+  const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [pendingSide, setPendingSide] = useState<'YES' | 'NO' | null>(null);
   const [amount, setAmount] = useState(0.1);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
   const startX = useRef(0);
+  const startY = useRef(0);
 
   const active = markets.filter((m) => !m.resolved && !done.has(m.id));
   const market = active[0] ?? null;
@@ -43,6 +46,7 @@ export default function SwipeView({ markets }: Props) {
 
   function onTouchStart(e: React.TouchEvent) {
     startX.current = e.touches[0].clientX;
+    startY.current = e.touches[0].clientY;
     setIsDragging(true);
     setMsg('');
   }
@@ -50,6 +54,7 @@ export default function SwipeView({ markets }: Props) {
   function onTouchMove(e: React.TouchEvent) {
     if (!isDragging) return;
     setDragX(e.touches[0].clientX - startX.current);
+    setDragY(e.touches[0].clientY - startY.current);
   }
 
   function onTouchEnd() {
@@ -63,19 +68,29 @@ export default function SwipeView({ markets }: Props) {
 
     if (Math.abs(dragX) >= SWIPE_THRESHOLD) {
       if (dragX > 0) {
-        // Right swipe → auto-open YES popup
-        setPendingSide('YES');
+        // Right swipe → open buy sheet, no side pre-selected
+        setSheetOpen(true);
+        setPendingSide(null);
         setAmount(0.1);
+        setMsg('');
       } else {
-        // Left swipe → auto-skip to next market
+        // Left swipe → skip to next market
         skipCard();
       }
     }
     setDragX(0);
+    setDragY(0);
   }
 
   function skipCard() {
     setDone((prev) => new Set(prev).add(market.id));
+    setMsg('');
+  }
+
+  function closeSheet() {
+    if (loading) return;
+    setSheetOpen(false);
+    setPendingSide(null);
     setMsg('');
   }
 
@@ -91,6 +106,7 @@ export default function SwipeView({ markets }: Props) {
       setMsg(`Bought ${res.tokens.toLocaleString()} ${pendingSide} tokens!`);
       setTimeout(() => {
         setDone((prev) => new Set(prev).add(market.id));
+        setSheetOpen(false);
         setPendingSide(null);
         setMsg('');
       }, 1000);
@@ -117,25 +133,25 @@ export default function SwipeView({ markets }: Props) {
       <div
         className="absolute inset-x-0 top-0 bottom-8 bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl overflow-hidden touch-none"
         style={{
-          transform: `translateX(${dragX}px) rotate(${rotation}deg)`,
+          transform: `translateX(${dragX}px) translateY(${dragY}px) rotate(${rotation}deg)`,
           transition: isDragging ? 'none' : 'transform 0.35s cubic-bezier(.25,.8,.25,1)',
         }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
-        {/* YES overlay */}
+        {/* BUY overlay (right swipe) */}
         {dragX > 0 && (
           <div
             className="absolute inset-0 bg-emerald-500/15 flex items-center justify-start pl-6 z-10 pointer-events-none"
             style={{ opacity: overlayOpacity }}
           >
             <span className="border-4 border-emerald-400 text-emerald-400 text-3xl font-black px-3 py-1 rounded-xl -rotate-12">
-              YES
+              BUY
             </span>
           </div>
         )}
-        {/* NO overlay */}
+        {/* SKIP overlay (left swipe) */}
         {dragX < 0 && (
           <div
             className="absolute inset-0 bg-gray-600/15 flex items-center justify-end pr-6 z-10 pointer-events-none"
@@ -186,94 +202,125 @@ export default function SwipeView({ markets }: Props) {
           <div className="flex justify-between items-center text-sm">
             <span className="text-gray-500/80 font-semibold">← Skip</span>
             <button onClick={skipCard} className="text-xs text-gray-700 underline underline-offset-2">
-              manual skip
+              skip
             </button>
-            <span className="text-emerald-500/80 font-semibold">Buy YES →</span>
+            <span className="text-emerald-500/80 font-semibold">Buy →</span>
           </div>
         </div>
       </div>
 
-      {/* Amount confirmation bottom sheet */}
-      {pendingSide && (
+      {/* Buy modal */}
+      {sheetOpen && (
         <div
-          className="fixed inset-0 bg-black/70 z-50 flex items-end"
-          onClick={() => !loading && setPendingSide(null)}
+          className="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={closeSheet}
         >
           <div
-            className="w-full bg-gray-900 border-t border-gray-800 rounded-t-2xl p-5 pb-8 safe-bottom"
+            className="relative w-full bg-gray-950 sm:max-w-sm rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-800 my-0 sm:my-auto"
+            style={{ maxHeight: '90dvh' }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Handle */}
-            <div className="w-10 h-1 bg-gray-700 rounded-full mx-auto mb-5" />
-
-            <p className="font-bold text-lg text-center mb-1">
-              Buy{' '}
-              <span className={pendingSide === 'YES' ? 'text-emerald-400' : 'text-red-400'}>
-                {pendingSide}
-              </span>
-            </p>
-            <p className="text-xs text-gray-500 text-center mb-5 px-4 leading-relaxed">
-              {market.question}
-            </p>
-
-            {/* Preset amounts */}
-            <div className="grid grid-cols-4 gap-2 mb-4">
-              {PRESETS.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setAmount(p)}
-                  className={`py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
-                    amount === p
-                      ? pendingSide === 'YES'
-                        ? 'bg-emerald-600 border-emerald-600 text-white'
-                        : 'bg-red-700 border-red-700 text-white'
-                      : 'border-gray-700 text-gray-400 hover:border-gray-500'
-                  }`}
-                >
-                  {p}A
-                </button>
-              ))}
+            {/* Mobile drag handle */}
+            <div className="flex justify-center pt-3 pb-1 sm:hidden">
+              <div className="w-12 h-1.5 bg-gray-800 rounded-full" />
             </div>
 
-            {/* Custom input */}
-            <input
-              type="number"
-              className="input mb-4"
-              placeholder="Custom amount in ALGO"
-              min="0"
-              step="0.1"
-              value={amount || ''}
-              onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
-            />
+            {/* Header */}
+            <div className="px-5 pt-2 sm:pt-5 pb-4 border-b border-gray-800">
+              <p className="text-base font-semibold text-gray-300 text-center line-clamp-3 leading-snug px-2">
+                {market.question}
+              </p>
+            </div>
 
-            {msg && (
-              <p
-                className={`text-sm mb-3 text-center ${
-                  msg.startsWith('Bought') ? 'text-emerald-400' : 'text-red-400'
+            <div className="px-5 py-5 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(90dvh - 120px)', paddingBottom: 'calc(env(safe-area-inset-bottom, 16px) + 20px)' }}>
+              {/* YES / NO toggle */}
+              <div className="flex rounded-2xl overflow-hidden border border-gray-800">
+                <button
+                  onClick={() => setPendingSide('YES')}
+                  className={`flex-1 py-3.5 text-base font-bold transition-colors ${
+                    pendingSide === 'YES'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-gray-900 text-gray-500'
+                  }`}
+                >
+                  ✓ YES &nbsp;{formatProb(prob)}
+                </button>
+                <button
+                  onClick={() => setPendingSide('NO')}
+                  className={`flex-1 py-3.5 text-base font-bold transition-colors ${
+                    pendingSide === 'NO'
+                      ? 'bg-red-700 text-white'
+                      : 'bg-gray-900 text-gray-500'
+                  }`}
+                >
+                  ✗ NO &nbsp;{formatProb(1 - prob)}
+                </button>
+              </div>
+
+              {/* Preset amounts */}
+              <div>
+                <p className="text-xs text-gray-600 uppercase tracking-wider mb-2">Amount (ALGO)</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setAmount(p)}
+                      className={`py-2.5 rounded-xl text-sm font-bold border transition-colors active:scale-95 ${
+                        amount === p
+                          ? pendingSide === 'YES'
+                            ? 'bg-emerald-600 border-emerald-600 text-white'
+                            : pendingSide === 'NO'
+                            ? 'bg-red-700 border-red-700 text-white'
+                            : 'bg-gray-700 border-gray-700 text-white'
+                          : 'border-gray-800 bg-gray-900 text-gray-300'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom input */}
+              <input
+                type="number"
+                inputMode="decimal"
+                className="w-full bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5 text-base text-white placeholder-gray-600 outline-none focus:border-gray-600"
+                placeholder="Custom amount…"
+                min="0"
+                step="0.1"
+                value={amount || ''}
+                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
+              />
+
+              {msg && (
+                <p className={`text-sm text-center font-medium ${msg.startsWith('Bought') ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {msg}
+                </p>
+              )}
+
+              {/* Confirm */}
+              <button
+                onClick={confirmTrade}
+                disabled={loading || amount <= 0 || !pendingSide}
+                className={`w-full py-3.5 rounded-2xl font-bold text-base transition-colors disabled:opacity-40 active:scale-[0.98] ${
+                  pendingSide === 'YES'
+                    ? 'bg-emerald-600'
+                    : pendingSide === 'NO'
+                    ? 'bg-red-700'
+                    : 'bg-gray-800'
                 }`}
               >
-                {msg}
-              </p>
-            )}
+                {loading ? 'Processing…' : pendingSide ? `Buy ${pendingSide} · ${amount} ALGO` : 'Select YES or NO'}
+              </button>
 
-            <button
-              onClick={confirmTrade}
-              disabled={loading || amount <= 0}
-              className={`w-full py-3.5 rounded-xl font-bold text-base transition-colors disabled:opacity-50 ${
-                pendingSide === 'YES'
-                  ? 'bg-emerald-600 hover:bg-emerald-500'
-                  : 'bg-red-700 hover:bg-red-600'
-              }`}
-            >
-              {loading ? '…' : `Confirm ${pendingSide} — ${amount} ALGO`}
-            </button>
-
-            <button
-              onClick={() => setPendingSide(null)}
-              className="w-full py-2.5 mt-2 text-gray-500 text-sm"
-            >
-              Cancel
-            </button>
+              <button
+                onClick={closeSheet}
+                className="w-full py-2.5 text-gray-500 text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
