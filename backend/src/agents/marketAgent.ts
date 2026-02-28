@@ -1,0 +1,158 @@
+import { TwitterService } from '../services/twitter.service';
+import { TrendFilterService } from '../services/trendFilter.service';
+import { MarketGeneratorService } from '../services/marketGenerator.service';
+import { ProbabilityService } from '../services/probability.service';
+import { AdvisorService } from '../services/advisor.service';
+
+interface AgentState {
+  step: string;
+  trends: any[];
+  filtered_trends: any[];
+  generated_market: any;
+  probability_estimate: any;
+  advisor_analysis: any;
+  error?: string;
+}
+
+export class MarketAgent {
+  private twitterService: TwitterService;
+  private trendFilterService: TrendFilterService;
+  private marketGeneratorService: MarketGeneratorService;
+  private probabilityService: ProbabilityService;
+  private advisorService: AdvisorService;
+
+  constructor() {
+    this.twitterService = new TwitterService();
+    this.trendFilterService = new TrendFilterService();
+    this.marketGeneratorService = new MarketGeneratorService();
+    this.probabilityService = new ProbabilityService();
+    this.advisorService = new AdvisorService();
+  }
+
+  async processMarketGeneration(input?: string): Promise<AgentState> {
+    const state: AgentState = {
+      step: 'start',
+      trends: [],
+      filtered_trends: [],
+      generated_market: null,
+      probability_estimate: null,
+      advisor_analysis: null
+    };
+
+    try {
+      // Step 1: Scan trends
+      state.step = 'scanning_trends';
+      state.trends = await this.twitterService.getTrends();
+      
+      // Step 2: Filter trends
+      state.step = 'filtering_trends';
+      state.filtered_trends = this.trendFilterService.filterTrends(state.trends);
+      
+      if (state.filtered_trends.length === 0) {
+        throw new Error('No marketable trends found');
+      }
+
+      // Step 3: Generate market
+      state.step = 'generating_market';
+      const topTrend = state.filtered_trends[0];
+      state.generated_market = await this.marketGeneratorService.generateMarket({
+        trend: topTrend.trend,
+        category: topTrend.category,
+        volume: topTrend.volume
+      });
+
+      // Step 4: Estimate probability
+      state.step = 'estimating_probability';
+      state.probability_estimate = await this.probabilityService.estimateProbability({
+        question: state.generated_market.question,
+        data_source: state.generated_market.data_source,
+        trend_data: {
+          volume: topTrend.volume,
+          category: topTrend.category,
+          timestamp: Date.now()
+        }
+      });
+
+      // Step 5: Validate market
+      state.step = 'validating_market';
+      this.validateMarket(state.generated_market, state.probability_estimate);
+
+      // Step 6: Generate advisory
+      state.step = 'analyzing_advisory';
+      state.advisor_analysis = this.advisorService.analyzeMarket({
+        ai_probability: state.probability_estimate.probability,
+        market_probability: 0.5, // Mock market probability
+        question: state.generated_market.question
+      });
+
+      state.step = 'completed';
+      return state;
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : 'Unknown error';
+      state.step = 'failed';
+      return state;
+    }
+  }
+
+  async scanTrendsOnly(): Promise<any[]> {
+    try {
+      const trends = await this.twitterService.getTrends();
+      const filtered = this.trendFilterService.filterTrends(trends);
+      return filtered;
+    } catch (error) {
+      console.error('Trend scanning failed:', error);
+      return [];
+    }
+  }
+
+  async generateMarketFromTrend(trend: string, category: string = 'general'): Promise<any> {
+    try {
+      const market = await this.marketGeneratorService.generateMarket({
+        trend,
+        category,
+        volume: 50000 // Default volume
+      });
+
+      const probability = await this.probabilityService.estimateProbability({
+        question: market.question,
+        data_source: market.data_source,
+        trend_data: {
+          volume: 50000,
+          category,
+          timestamp: Date.now()
+        }
+      });
+
+      const advisory = this.advisorService.analyzeMarket({
+        ai_probability: probability.probability,
+        market_probability: 0.5, // Mock market probability
+        question: market.question
+      });
+
+      return {
+        market,
+        probability,
+        advisory
+      };
+    } catch (error) {
+      console.error('Market generation from trend failed:', error);
+      throw error;
+    }
+  }
+
+  private validateMarket(market: any, probability: any): void {
+    const validations = [
+      { check: market.question && market.question.length > 10, message: 'Question too short' },
+      { check: market.data_source && market.data_source.length > 5, message: 'Data source missing' },
+      { check: new Date(market.expiry) > new Date(), message: 'Expiry in past' },
+      { check: probability.probability >= 0 && probability.probability <= 1, message: 'Invalid probability' },
+      { check: probability.confidence !== 'low', message: 'Low confidence estimate' }
+    ];
+
+    const failedValidations = validations.filter(v => !v.check);
+    
+    if (failedValidations.length > 0) {
+      throw new Error(`Validation failed: ${failedValidations.map(v => v.message).join(', ')}`);
+    }
+  }
+}

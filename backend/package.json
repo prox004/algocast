@@ -1,23 +1,49 @@
 {
-  "name": "castalgo-backend",
+  "name": "castalgo-ai-backend",
   "version": "1.0.0",
-  "description": "CastAlgo backend - custodial wallet + prediction markets on Algorand",
-  "main": "src/index.js",
+  "description": "AI-powered prediction market backend for CastAlgo",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "algosdk": "^2.7.0",
-    "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.18.3",
+    "dotenv": "^16.3.1",
     "jsonwebtoken": "^9.0.2",
-    "openai": "^4.38.0",
+    "bcryptjs": "^2.4.3",
+    "twitter-api-v2": "^1.15.1",
+    "openai": "^4.20.1",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
-  }
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/uuid": "^9.0.7",
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.2",
+    "ts-node-dev": "^2.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.1",
+    "@typescript-eslint/parser": "^6.13.1",
+    "eslint": "^8.54.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.8"
+  },
+  "keywords": [
+    "prediction-markets",
+    "ai",
+    "algorand",
+    "twitter",
+    "langgraph",
+    "typescript"
+  ],
+  "author": "CastAlgo Team",
+  "license": "MIT"
 }
