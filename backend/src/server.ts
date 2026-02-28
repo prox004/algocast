@@ -12,6 +12,7 @@ import { getAutoMarketGeneratorService } from './services/autoMarketGenerator.se
 const authRoutes = require('./routes/auth');
 const walletRoutes = require('./routes/wallet');
 const marketsRoutes = require('./routes/markets');
+const { seedMarkets } = require('./seed');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -76,6 +77,9 @@ autoGen.start();
 
 // Start server
 app.listen(PORT, () => {
+  // Seed curated markets into the in-memory DB before serving traffic
+  seedMarkets();
+
   console.log(`🚀 CastAlgo AI Backend running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🤖 AI endpoints: http://localhost:${PORT}/ai/*`);

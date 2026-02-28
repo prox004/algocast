@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
+const { seedMarkets } = require('./seed');
 const authRoutes = require('./routes/auth');
 const walletRoutes = require('./routes/wallet');
 const marketsRoutes = require('./routes/markets');
@@ -46,6 +47,9 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(PORT, () => {
+  // Seed curated markets before serving traffic
+  seedMarkets();
+
   console.log(`🚀 CastAlgo backend running on http://localhost:${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🤖 AI endpoints: http://localhost:${PORT}/ai/*`);
