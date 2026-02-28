@@ -104,7 +104,7 @@ export interface Market {
   resolved: boolean;
   outcome: 0 | 1 | null;
   ticker?: string | null;
-  asset_type?: 'stock' | 'crypto' | null;
+  asset_type?: 'stock' | 'crypto' | 'commodity' | null;
 }
 
 export interface Trade {
@@ -150,6 +150,35 @@ export interface PriceGraph {
   historical: PricePoint[];
   timeRange: '1h' | '24h' | '7d' | '30d' | '1y';
   source: string;
+}
+
+export interface SentimentArticle {
+  title: string;
+  source: string;
+  url: string;
+  sentiment?: 'positive' | 'negative' | 'neutral';
+}
+
+export interface SentimentResult {
+  success: boolean;
+  market_id: string;
+  news_articles_analyzed: number;
+  sentiment_score: number;           // -1 (very bearish) → +1 (very bullish)
+  sentiment_label: 'Bullish' | 'Bearish' | 'Neutral';
+  ai_probability_adjustment: number;
+  confidence: 'High' | 'Medium' | 'Low';
+  momentum_indicator:
+    | 'Strong Upward Momentum'
+    | 'Upward Momentum'
+    | 'Stable'
+    | 'Downward Momentum'
+    | 'Strong Downward Momentum';
+  explanation: string;
+  articles: SentimentArticle[];
+  ai_probability: number;
+  market_probability: number;
+  mispricing_percent: number;
+  fetched_at: string;
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -264,6 +293,10 @@ export async function resolveMarket(market_id: string, outcome: 0 | 1): Promise<
 
 export async function getAIAnalysis(market_id: string): Promise<AIAnalysis> {
   return request(`/ai/analysis/${market_id}`);
+}
+
+export async function getSentimentAnalysis(market_id: string): Promise<SentimentResult> {
+  return request(`/ai/sentiment/${market_id}`);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

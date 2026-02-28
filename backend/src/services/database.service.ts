@@ -20,7 +20,7 @@ export interface StoredMarket {
   category: string;
   volume: number;
   ticker?: string | null;
-  asset_type?: 'stock' | 'crypto' | null;
+  asset_type?: 'stock' | 'crypto' | 'commodity' | null;
 }
 
 export interface MarketFilter {

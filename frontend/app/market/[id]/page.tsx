@@ -14,6 +14,7 @@ import {
 } from '@/lib/api';
 import BuyPanel from '@/components/BuyPanel';
 import AIInsightPanel from '@/components/AIInsightPanel';
+import SentimentPanel from '@/components/SentimentPanel';
 import PriceChart from '@/components/PriceChart';
 
 export default function MarketDetailPage() {
@@ -148,6 +149,9 @@ export default function MarketDetailPage() {
 
       {/* AI Insight */}
       <AIInsightPanel marketId={market.id} />
+
+      {/* News Sentiment Analysis */}
+      <SentimentPanel marketId={market.id} />
 
       {/* Price Chart - Show if ticker exists */}
       {market.ticker && (

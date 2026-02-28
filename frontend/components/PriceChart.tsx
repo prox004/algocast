@@ -6,7 +6,7 @@ import { getMarketCurrentPrice, getMarketPriceGraph, CurrentPrice, PriceGraph } 
 interface PriceChartProps {
   marketId: string;
   ticker: string | null | undefined;
-  assetType?: 'stock' | 'crypto' | null;
+  assetType?: 'stock' | 'crypto' | 'commodity' | null;
 }
 
 export default function PriceChart({ marketId, ticker, assetType }: PriceChartProps) {

@@ -1,6 +1,7 @@
 import express from 'express';
 import { MarketAgent } from '../agents/marketAgent';
 import { AdvisorService } from '../services/advisor.service';
+import { getSentimentService } from '../services/sentiment.service';
 
 const router = express.Router();
 
@@ -27,6 +28,42 @@ const auth = (req: any, res: any, next: any) => {
   // For now, just pass through - integrate with existing auth later
   next();
 };
+
+// ── Sentiment endpoint ───────────────────────────────────────────────────────
+
+const db = require('../db');
+
+// GET /sentiment/:market_id — Real-time news sentiment for a market
+router.get('/sentiment/:market_id', async (req, res) => {
+  try {
+    const { market_id } = req.params;
+
+    // Look up the market from DB to get question + probability
+    const market = db.getMarketById(market_id);
+    if (!market) {
+      return res.status(404).json({
+        success: false,
+        error: `Market ${market_id} not found`,
+      });
+    }
+
+    const sentimentService = getSentimentService();
+    const result = await sentimentService.analyze(
+      market_id,
+      market.question,
+      market.market_probability ?? 0.5,
+    );
+
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[Sentiment] Endpoint error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to analyze sentiment',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
 
 // GET /scan-trends - Scan and return filtered trends
 router.get('/scan-trends', auth, async (req, res) => {
