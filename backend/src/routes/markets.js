@@ -3,6 +3,7 @@
  *
  * GET  /markets                    — list all markets
  * GET  /markets/user-orders/me     — current user's orders
+ * GET  /markets/user-trades/me     — current user's trades
  * GET  /markets/:id                — get single market
  * GET  /markets/:id/orderbook      — aggregated order book
  * POST /markets/generate           — create a new market (auto-seeds liquidity)
@@ -64,6 +65,36 @@ router.get('/user-orders/me', requireAuth, (req, res) => {
   } catch (err) {
     console.error('[user-orders]', err.message);
     return res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
+// GET /markets/user-trades/me (protected) — get current user's trades
+router.get('/user-trades/me', requireAuth, (req, res) => {
+  try {
+    const trades = db.getTradesByUser(req.user.id);
+
+    // Enrich trades with market information
+    const enrichedTrades = trades.map(trade => {
+      const market = db.getMarketById(trade.market_id);
+      return {
+        ...trade,
+        market_question: market ? market.question : 'Unknown Market',
+        category: market ? market.category : null,
+        market_expiry: market ? market.expiry : null,
+        market_resolved: market ? (market.outcome !== null) : false,
+        market_outcome: market ? market.outcome : null,
+        // Calculate profit/loss if market is resolved
+        profit_loss: market && market.outcome !== null ?
+          calculateTradeProfit(trade, market) : null,
+        is_winner: market && market.outcome !== null ?
+          isTradeWinner(trade, market) : null
+      };
+    });
+
+    return res.json({ trades: enrichedTrades });
+  } catch (err) {
+    console.error('[user-trades]', err.message);
+    return res.status(500).json({ error: 'Failed to fetch trades' });
   }
 });
 
@@ -497,6 +528,29 @@ function matchOrders(marketInput) {
   }
 
   return fills;
+}
+
+// Helper function to calculate trade profit/loss
+function calculateTradeProfit(trade, market) {
+  if (market.outcome === null) return null;
+
+  const isWinner = (trade.side === 'YES' && market.outcome === 1) ||
+                   (trade.side === 'NO'  && market.outcome === 0);
+
+  if (isWinner) {
+    // Winner gets 1 ALGO per token
+    return trade.tokens - (trade.amount / 1000000); // Convert microAlgos to Algos
+  } else {
+    // Loser loses their investment
+    return -(trade.amount / 1000000); // Convert microAlgos to Algos
+  }
+}
+
+// Helper function to determine if trade is a winner
+function isTradeWinner(trade, market) {
+  if (market.outcome === null) return null;
+  return (trade.side === 'YES' && market.outcome === 1) ||
+         (trade.side === 'NO'  && market.outcome === 0);
 }
 
 module.exports = router;

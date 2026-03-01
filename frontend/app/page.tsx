@@ -5,6 +5,7 @@ import { getMarkets, type Market } from '@/lib/api';
 import MarketCard from '@/components/MarketCard';
 import SwipeView from '@/components/SwipeView';
 import CategoryTabs, { type CategoryKey } from '@/components/CategoryTabs';
+import DashboardCards from '@/components/DashboardCards';
 
 export default function HomePage() {
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -76,6 +77,9 @@ export default function HomePage() {
 
   return (
     <div>
+      {/* Dashboard info cards */}
+      <DashboardCards />
+
       {/* Header row */}
       <div className="mb-4 flex items-end justify-between gap-4">
         <div>
