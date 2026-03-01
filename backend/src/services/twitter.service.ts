@@ -312,7 +312,10 @@ export class TwitterService {
             
             console.log(`✅ [TwitterService] Found real tweet from @${username}: "${((latestTweet as any).text || '').substring(0, 50)}..."`);
           } else {
-            console.log(`[TwitterService] No new tweets from @${username} since cursor`);
+            // No new tweets — advance cursor to cycle start so the same
+            // empty window is never re-checked next cycle.
+            this.accountSince.set(username, cycleStart);
+            console.log(`[TwitterService] No new tweets from @${username} since cursor, cursor advanced to now`);
           }
         } catch (err) {
           console.error(`Error fetching tweets for @${username}:`, err);

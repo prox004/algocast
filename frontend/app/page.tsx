@@ -23,11 +23,19 @@ export default function HomePage() {
   // Compute category counts from all markets
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
+    const now = Date.now() / 1000;
     for (const m of markets) {
       const cat = m.category || 'general';
       counts[cat] = (counts[cat] || 0) + 1;
     }
     counts['all'] = markets.length;
+    counts['open'] = markets.filter(
+      (m) => !m.resolved && m.expiry > now
+    ).length;
+    counts['expired'] = markets.filter(
+      (m) => !m.resolved && m.expiry <= now
+    ).length;
+    counts['resolved'] = markets.filter((m) => m.resolved).length;
     counts['trending'] = markets
       .filter((m) => (m.yes_reserve + m.no_reserve) > 0)
       .length;
@@ -42,7 +50,17 @@ export default function HomePage() {
 
   // Filter markets based on selected category
   const filteredMarkets = useMemo(() => {
+    const now = Date.now() / 1000;
     if (activeCategory === 'all') return markets;
+    if (activeCategory === 'open') {
+      return markets.filter((m) => !m.resolved && m.expiry > now);
+    }
+    if (activeCategory === 'expired') {
+      return markets.filter((m) => !m.resolved && m.expiry <= now);
+    }
+    if (activeCategory === 'resolved') {
+      return markets.filter((m) => m.resolved);
+    }
     if (activeCategory === 'trending') {
       return [...markets]
         .filter((m) => (m.yes_reserve + m.no_reserve) > 0)

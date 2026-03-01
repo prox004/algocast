@@ -197,13 +197,17 @@ export class AutoMarketGeneratorService {
   }
 
   /**
-   * Load all existing market questions into memory to avoid duplicates
+   * Load all existing market questions and tweet IDs into memory to avoid duplicates
    */
   private loadExistingMarkets() {
     const markets = db.getAllMarkets?.() || [];
     markets.forEach((market: any) => {
       this.generatedQuestions.add(market.question);
+      if (market.tweet_id) {
+        this.processedTweetIds.add(market.tweet_id);
+      }
     });
+    console.log(`[AutoMarketGen] Loaded ${this.generatedQuestions.size} questions and ${this.processedTweetIds.size} tweet IDs from DB`);
   }
 
   /**
@@ -250,7 +254,9 @@ export class AutoMarketGeneratorService {
   }
 
   /**
-   * Single generation cycle — processes ALL new tweets found in this cycle
+   * Single generation cycle — processes ALL new tweets found in this cycle.
+   * This is the SINGLE authoritative save point for markets from tweets.
+   * MarketAgent no longer writes to legacyDb to prevent duplicate cards.
    */
   private async generateOnce() {
     try {
@@ -278,26 +284,34 @@ export class AutoMarketGeneratorService {
       const probability = result.probability_estimate;
       const advisory = result.advisor_analysis;
 
-      // Extract tweet_id and category from the trend data that generated this market
+      // Extract tweet metadata and category from the trend data
       const topTrend = result.filtered_trends?.[0] || result.trends?.[0];
       const tweetId = topTrend?.tweet_id;
+      const tweetAuthor = topTrend?.tweet_author || null;
+      const tweetContent = topTrend?.tweet_content || topTrend?.trend || null;
       const category = topTrend?.category || 'general';
 
       console.log('✅ [AutoMarketGen] Market generated from REAL tweet!');
       console.log(`   Question: "${market.question}"`);
+      console.log(`   Category: ${category}`);
       if (tweetId) {
-        console.log(`   Tweet ID: ${tweetId}`);
+        console.log(`   Tweet ID: ${tweetId} by @${tweetAuthor}`);
       }
 
-      // Check for duplicate by tweet ID first (most reliable)
+      // ── Dedup: check in-memory sets ────────────────────────────────────
       if (tweetId && this.processedTweetIds.has(tweetId)) {
-        console.log(`⏭️  [AutoMarketGen] Tweet ${tweetId} already processed into a market, skipping`);
+        console.log(`⏭️  [AutoMarketGen] Tweet ${tweetId} already processed (in-memory), skipping`);
+        return;
+      }
+      if (this.generatedQuestions.has(market.question)) {
+        console.log('⏭️  [AutoMarketGen] Question already exists (in-memory), skipping');
         return;
       }
 
-      // Check for duplicate by question text
-      if (this.generatedQuestions.has(market.question)) {
-        console.log('⏭️  [AutoMarketGen] Question already exists, skipping');
+      // ── Dedup: check DB by tweet_id (survives restarts) ────────────────
+      if (tweetId && db.getMarketByTweetId(tweetId)) {
+        console.log(`⏭️  [AutoMarketGen] Tweet ${tweetId} already has a market in DB, skipping`);
+        this.processedTweetIds.add(tweetId);
         return;
       }
 
@@ -330,7 +344,7 @@ export class AutoMarketGeneratorService {
         no_asa_id:   deployment.no_asa_id,
       });
 
-      // Create in DB with real on-chain IDs
+      // ── Single authoritative DB write (with on-chain IDs + tweet metadata) ──
       const createdMarket = db.createMarket({
         id: uuidv4(),
         question: market.question,
@@ -346,9 +360,11 @@ export class AutoMarketGeneratorService {
         app_id:      deployment.app_id,
         app_address: deployment.app_address,
         data_source: market.data_source || 'Twitter',
-        ai_advisory: advisory?.advice || 'HOLD',
-        created_by: 'AI_AGENT',
-        created_at: Math.floor(Date.now() / 1000),
+        tweet_id: tweetId || null,
+        tweet_author: tweetAuthor,
+        tweet_content: tweetContent,
+        ticker: market.ticker || topTrend?.ticker || null,
+        asset_type: market.asset_type || topTrend?.asset_type || null,
       });
 
       this.generatedQuestions.add(market.question);
@@ -359,8 +375,10 @@ export class AutoMarketGeneratorService {
       console.log('[AutoMarketGen] ✅ Market created:', {
         id: createdMarket.id,
         question: createdMarket.question,
+        category: category,
         ai_probability: createdMarket.ai_probability,
         tweet_id: tweetId || 'N/A',
+        tweet_author: tweetAuthor || 'N/A',
       });
     } catch (err) {
       console.error('[AutoMarketGen] Error during cycle:', err instanceof Error ? err.message : String(err));

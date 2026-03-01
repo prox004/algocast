@@ -7,7 +7,7 @@ import { tickerExtractionService } from '../services/tickerExtraction.service';
 import { getDatabase, StoredMarket } from '../services/database.service';
 import { v4 as uuidv4 } from 'uuid';
 
-// Legacy db.js for the frontend-facing market list
+// Legacy db.js for dedup checks (getMarketByTweetId)
 const legacyDb = require('../db');
 
 interface AgentState {
@@ -143,9 +143,10 @@ export class MarketAgent {
         throw validationError;
       }
 
-      // Step 6: Save to database
-      state.step = 'saving_to_database';
-      this.saveMarketToDatabase(state.generated_market, state.probability_estimate, topTrend);
+      // Step 6: We skip DB save here — the caller (AutoMarketGeneratorService)
+      // handles on-chain deployment AND the single DB write to avoid duplicates.
+      // The trend metadata is passed back through state.filtered_trends.
+      state.step = 'skipping_save_for_caller';
 
       // Step 7: Generate advisory
       state.step = 'analyzing_advisory';
@@ -285,42 +286,15 @@ export class MarketAgent {
         asset_type: tickerInfo?.assetType || null,
       };
 
-      // Save to legacy db.js FIRST — this is what the frontend reads
-      try {
-        const expiryTs = Math.floor(new Date(market.expiry).getTime() / 1000);
-        legacyDb.createMarket({
-          id: storedMarket.id,
-          question: storedMarket.question,
-          expiry: expiryTs,
-          data_source: storedMarket.data_source,
-          ai_probability: storedMarket.ai_probability,
-          market_probability: 0.5,
-          yes_reserve: 0,
-          no_reserve: 0,
-          yes_asa_id: null,
-          no_asa_id: null,
-          app_id: null,
-          app_address: null,
-          outcome: null,
-          status: 'active',
-          tweet_id: storedMarket.tweet_id || null,
-          tweet_author: storedMarket.tweet_author || null,
-          tweet_content: storedMarket.tweet_content || null,
-          ticker: storedMarket.ticker || null,
-          asset_type: storedMarket.asset_type || null,
-        });
-        console.log(`[MarketAgent] ✅ Saved to legacy DB for frontend`);
-      } catch (legacyErr: any) {
-        // Don't fail if legacy save has issues (e.g. duplicate ID)
-        if (!legacyErr.message?.includes('UNIQUE constraint')) {
-          console.warn(`[MarketAgent] ⚠️ Legacy DB save failed:`, legacyErr.message);
-        }
-      }
+      // Save to legacy db.js is intentionally SKIPPED here.
+      // The caller (AutoMarketGeneratorService.generateOnce) handles the single
+      // authoritative write to legacyDb after on-chain deployment, preventing
+      // the duplicate-market bug where two cards appeared for the same tweet.
 
-      // Also save to DatabaseService (for TS routes / internal queries)
+      // Save to DatabaseService (for TS routes / internal queries only)
       try {
         db.saveMarket(storedMarket);
-        console.log(`[MarketAgent] ✅ Also saved to DatabaseService`);
+        console.log(`[MarketAgent] ✅ Saved to DatabaseService (internal tracking)`);
       } catch (dbErr: any) {
         if (!dbErr.message?.includes('UNIQUE constraint')) {
           console.warn(`[MarketAgent] ⚠️ DatabaseService save failed:`, dbErr.message);

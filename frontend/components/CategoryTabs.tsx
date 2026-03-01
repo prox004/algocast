@@ -5,6 +5,9 @@ import { useRef, useState, useEffect } from 'react';
 /** All supported categories — order matters (shown left-to-right) */
 const CATEGORIES = [
   { key: 'all',              label: 'All',               icon: '📊' },
+  { key: 'open',             label: 'Open',              icon: '🟢' },
+  { key: 'expired',          label: 'Expired',           icon: '⏰' },
+  { key: 'resolved',         label: 'Resolved',          icon: '✅' },
   { key: 'trending',         label: 'Trending',          icon: '🔥' },
   { key: 'new',              label: 'New',               icon: '✨' },
   { key: 'politics',         label: 'Politics',          icon: '🏛️' },
@@ -58,10 +61,10 @@ export default function CategoryTabs({ active, onChange, counts }: Props) {
     scrollRef.current?.scrollBy({ left: dir === 'left' ? -200 : 200, behavior: 'smooth' });
   }
 
-  // Determine visible categories: always show 'all', 'trending', 'new',
-  // plus any category that has at least 1 market (if counts provided)
+  // Determine visible categories: always show status filters + 'all', 'trending', 'new',
+  // plus any content category that has at least 1 market (if counts provided)
   const visible = CATEGORIES.filter((cat) => {
-    if (['all', 'trending', 'new'].includes(cat.key)) return true;
+    if (['all', 'open', 'expired', 'resolved', 'trending', 'new'].includes(cat.key)) return true;
     if (!counts) return true; // no count info → show everything
     return (counts[cat.key] ?? 0) > 0;
   });

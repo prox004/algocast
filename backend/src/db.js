@@ -305,10 +305,11 @@ const statements = {
   insertMarket: sqlite.prepare(`
     INSERT INTO markets (id, question, expiry, data_source, ai_probability, market_probability, 
                          yes_reserve, no_reserve, yes_asa_id, no_asa_id, app_id, app_address, 
-                         outcome, status, created_at, tweet_id, tweet_author, tweet_content, ticker, asset_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         outcome, status, created_at, tweet_id, tweet_author, tweet_content, ticker, asset_type, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getMarketById: sqlite.prepare('SELECT * FROM markets WHERE id = ?'),
+  getMarketByTweetId: sqlite.prepare('SELECT * FROM markets WHERE tweet_id = ? LIMIT 1'),
   getAllMarkets: sqlite.prepare('SELECT * FROM markets ORDER BY created_at DESC'),
   updateMarket: sqlite.prepare(`
     UPDATE markets SET 
@@ -467,7 +468,8 @@ const db = {
         market.tweet_author || null,
         market.tweet_content || null,
         market.ticker || null,
-        market.asset_type || null
+        market.asset_type || null,
+        market.category || null
       );
       return market;
     } catch (err) {
@@ -478,6 +480,11 @@ const db = {
 
   getMarketById(id) {
     return statements.getMarketById.get(id) || null;
+  },
+
+  getMarketByTweetId(tweetId) {
+    if (!tweetId) return null;
+    return statements.getMarketByTweetId.get(tweetId) || null;
   },
 
   getAllMarkets() {
