@@ -86,7 +86,10 @@ export class SentimentService {
         console.log(`[SentimentService] Checking for new news for ${marketId}...`);
         this.newsCheckTimestamps.set(marketId, now);
 
-        const freshNews = await this.getNewsSentiment(question);
+        // Get market context for better news fetching
+        const db = require('../db');
+        const market = db.getMarketById(marketId);
+        const freshNews = await this.getContextualNewsSentiment(question, market);
         const freshFingerprint = this.fingerprint(freshNews.articles);
 
         if (freshFingerprint === cached.newsFingerprint) {
@@ -112,7 +115,12 @@ export class SentimentService {
 
       // ── Cache miss or expired → full analysis ────────────────────────────
       console.log(`[SentimentService] Cache MISS for ${marketId} → running full analysis`);
-      const newsSentiment = await this.getNewsSentiment(question);
+      
+      // Get market context for enhanced news fetching
+      const db = require('../db');
+      const market = db.getMarketById(marketId);
+      const newsSentiment = await this.getContextualNewsSentiment(question, market);
+      
       this.newsCheckTimestamps.set(marketId, now);
       return this.runFullAnalysis(marketId, question, crowdProbability, newsSentiment);
     } catch (error: any) {
@@ -403,6 +411,387 @@ Respond with ONLY valid JSON, no markdown.`;
       console.error('[SentimentService] News sentiment error:', error);
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
+  }
+
+  // ── Enhanced Contextual News Fetching ────────────────────────────────────────
+
+  private async getContextualNewsSentiment(
+    question: string,
+    market: any
+  ): Promise<{ score: number; confidence: number; articleCount: number; mentions: number; articles: NewsArticle[] }> {
+    if (!this.newsApiKey) {
+      return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
+    }
+
+    console.log(`[SentimentService] Analyzing context for market: ${market?.id}`);
+    
+    // Step 1: Analyze tweet + question context
+    const context = await this.analyzeMarketContext(question, market);
+    
+    if (context.searchQueries.length === 0) {
+      console.log(`[SentimentService] No valid search queries generated`);
+      return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
+    }
+
+    try {
+      const allArticles: any[] = [];
+      const seenUrls = new Set<string>();
+      const now = new Date();
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      // Step 2: Fetch recent news with enhanced queries
+      for (const query of context.searchQueries) {
+        try {
+          console.log(`[SentimentService] Searching news for: "${query}"`);
+          
+          const response = await axios.get('https://newsapi.org/v2/everything', {
+            params: {
+              q: query,
+              language: 'en',
+              sortBy: 'publishedAt', // Recent first
+              from: yesterday.toISOString().split('T')[0], // Last 24 hours
+              pageSize: 20,
+              apiKey: this.newsApiKey
+            },
+            timeout: 8000
+          });
+
+          const articles = response.data.articles || [];
+          console.log(`[SentimentService] Query "${query}" → ${articles.length} recent articles`);
+
+          if (articles.length === 0) {
+            console.log(`[SentimentService] No articles found for "${query}"`);
+          }
+
+          for (const article of articles) {
+            const url = article.url || '';
+            if (!seenUrls.has(url) && this.isRecentArticle(article.publishedAt)) {
+              seenUrls.add(url);
+              allArticles.push(article);
+              console.log(`[SentimentService] Added article: "${article.title}" from ${article.source?.name}`);
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[SentimentService] Query failed: "${query}" - ${err.message}`);
+          if (err.response?.status === 401) {
+            console.error('[SentimentService] News API authentication failed - check API key');
+          }
+        }
+      }
+
+      if (allArticles.length === 0) {
+        console.log(`[SentimentService] No recent articles found`);
+        return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
+      }
+
+      console.log(`[SentimentService] Found ${allArticles.length} total articles, filtering for relevance...`);
+
+      // Step 3: Enhanced relevance filtering with context
+      const relevantArticles = await this.filterByContextualRelevance(
+        allArticles,
+        context
+      );
+
+      console.log(`[SentimentService] ${relevantArticles.length} articles passed relevance filter`);
+
+      return this.scoreSentiment(relevantArticles);
+    } catch (error: any) {
+      console.error('[SentimentService] Contextual news sentiment error:', error);
+      return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
+    }
+  }
+
+  private async analyzeMarketContext(question: string, market: any): Promise<{
+    searchQueries: string[];
+    keyEntities: string[];
+    topic: string;
+    tweetContext?: string;
+    timeframe?: string;
+  }> {
+    try {
+      // Check if we have OpenRouter API key
+      if (!process.env.OPENROUTER_API_KEY) {
+        console.log('[SentimentService] OpenRouter API key not configured, using fallback analysis');
+        return this.fallbackContextAnalysis(question, market);
+      }
+
+      const contextPrompt = `
+Analyze this prediction market to generate precise news search queries:
+
+MARKET QUESTION: "${question}"
+${market?.tweet_content ? `ORIGINAL TWEET: "${market.tweet_content}"` : ''}
+${market?.tweet_author ? `TWEET AUTHOR: @${market.tweet_author}` : ''}
+${market?.category ? `CATEGORY: ${market.category}` : ''}
+${market?.ticker ? `TICKER: ${market.ticker}` : ''}
+
+Extract:
+1. Key entities (companies, people, events, locations)
+2. Main topic/subject
+3. Specific timeframe if mentioned
+4. 3-5 precise search queries for recent news
+
+Focus on entities and events that would have recent news coverage.
+
+Return JSON:
+{
+  "keyEntities": ["entity1", "entity2"],
+  "topic": "main subject",
+  "timeframe": "specific time period if any",
+  "searchQueries": ["query1", "query2", "query3"]
+}`;
+
+      const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: 'anthropic/claude-3-haiku',
+          messages: [{ role: 'user', content: contextPrompt }],
+          max_tokens: 300,
+          temperature: 0.3,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'http://localhost:4000',
+            'X-Title': 'Algocast Sentiment Analysis'
+          },
+          timeout: 10000,
+        }
+      );
+
+      const analysis = this.parseJSON(response.data.choices[0]?.message?.content || '{}');
+      
+      console.log(`[SentimentService] Context analysis:`, {
+        entities: analysis.keyEntities?.length || 0,
+        queries: analysis.searchQueries?.length || 0,
+        topic: analysis.topic
+      });
+
+      return {
+        searchQueries: analysis.searchQueries || [],
+        keyEntities: analysis.keyEntities || [],
+        topic: analysis.topic || question,
+        tweetContext: market?.tweet_content,
+        timeframe: analysis.timeframe
+      };
+    } catch (error: any) {
+      console.error('[SentimentService] Context analysis error:', error.message);
+      
+      // Fallback to basic understanding
+      return this.fallbackContextAnalysis(question, market);
+    }
+  }
+
+  private fallbackContextAnalysis(question: string, market: any): {
+    searchQueries: string[];
+    keyEntities: string[];
+    topic: string;
+    tweetContext?: string;
+    timeframe?: string;
+  } {
+    console.log('[SentimentService] Using fallback context analysis');
+    
+    // Extract basic entities from question and tweet
+    const text = `${question} ${market?.tweet_content || ''}`.toLowerCase();
+    const entities: string[] = [];
+    
+    // Common entity patterns
+    const companyPatterns = ['tesla', 'bitcoin', 'ethereum', 'apple', 'google', 'microsoft', 'amazon'];
+    const personPatterns = ['elon', 'vitalik', 'satoshi', 'bezos', 'gates'];
+    
+    companyPatterns.forEach(company => {
+      if (text.includes(company)) entities.push(company);
+    });
+    
+    personPatterns.forEach(person => {
+      if (text.includes(person)) entities.push(person);
+    });
+    
+    // Generate basic search queries
+    const queries: string[] = [];
+    
+    if (market?.ticker) {
+      queries.push(`${market.ticker} news`);
+      queries.push(`${market.ticker} price`);
+    }
+    
+    if (market?.tweet_author) {
+      queries.push(`${market.tweet_author} news`);
+    }
+    
+    entities.forEach(entity => {
+      queries.push(`${entity} news today`);
+    });
+    
+    // If no specific queries, use question keywords
+    if (queries.length === 0) {
+      const keywords = question.split(' ').filter(word => 
+        word.length > 4 && !['will', 'than', 'more', 'next', 'week', 'month'].includes(word.toLowerCase())
+      );
+      
+      keywords.slice(0, 3).forEach(keyword => {
+        queries.push(`${keyword} news`);
+      });
+    }
+    
+    return {
+      searchQueries: queries.slice(0, 5),
+      keyEntities: entities,
+      topic: question,
+      tweetContext: market?.tweet_content
+    };
+  }
+
+  private isRecentArticle(publishedAt: string): boolean {
+    if (!publishedAt) return false;
+    
+    const articleDate = new Date(publishedAt);
+    const now = new Date();
+    const hoursDiff = (now.getTime() - articleDate.getTime()) / (1000 * 60 * 60);
+    
+    return hoursDiff <= 24; // Only articles from last 24 hours
+  }
+
+  private async filterByContextualRelevance(
+    articles: any[],
+    context: {
+      searchQueries: string[];
+      keyEntities: string[];
+      topic: string;
+      tweetContext?: string;
+    }
+  ): Promise<{ article: any; relevance: number; sentimentLabel: 'positive' | 'negative' | 'neutral' }[]> {
+    if (!process.env.OPENROUTER_API_KEY) {
+      console.log(`[SentimentService] OpenRouter API key not available, using fallback relevance filtering`);
+      return this.fallbackContextualFilter(articles, context);
+    }
+
+    try {
+      const articlesToCheck = articles.slice(0, 10); // Limit for API efficiency
+      
+      if (articlesToCheck.length === 0) {
+        return [];
+      }
+      
+      const relevancePrompt = `
+Rate article relevance and sentiment for this prediction market:
+
+MARKET CONTEXT:
+- Topic: ${context.topic}
+- Key Entities: ${context.keyEntities.join(', ')}
+${context.tweetContext ? `- Original Tweet: "${context.tweetContext}"` : ''}
+
+ARTICLES TO RATE:
+${articlesToCheck.map((article, i) => 
+  `${i + 1}. "${article.title}" - ${article.description || 'No description'}`
+).join('\n')}
+
+For each article, rate:
+1. Relevance (0-10): How relevant to the market prediction
+2. Sentiment: positive/negative/neutral toward the predicted outcome
+
+Only articles about the EXACT entities/events should score 7+ relevance.
+
+Return JSON array: [{"index": 1, "relevance": 8, "sentiment": "positive", "reason": "why"}, ...]`;
+
+      console.log(`[SentimentService] Analyzing ${articlesToCheck.length} articles with OpenRouter...`);
+
+      const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: 'anthropic/claude-3-haiku',
+          messages: [{ role: 'user', content: relevancePrompt }],
+          max_tokens: 600,
+          temperature: 0.2,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'http://localhost:4000',
+            'X-Title': 'Algocast Sentiment Analysis'
+          },
+          timeout: 15000,
+        }
+      );
+
+      const ratings = this.parseJSON(response.data.choices[0]?.message?.content || '[]');
+      
+      const relevantArticles: { article: any; relevance: number; sentimentLabel: 'positive' | 'negative' | 'neutral' }[] = [];
+      
+      for (const rating of ratings) {
+        if (rating.relevance >= 6 && rating.index > 0 && rating.index <= articlesToCheck.length) {
+          const article = articlesToCheck[rating.index - 1];
+          const sentiment = ['positive', 'negative', 'neutral'].includes(rating.sentiment) 
+            ? rating.sentiment 
+            : 'neutral';
+            
+          relevantArticles.push({
+            article,
+            relevance: rating.relevance,
+            sentimentLabel: sentiment as 'positive' | 'negative' | 'neutral'
+          });
+          
+          console.log(`[SentimentService] Relevant article (${rating.relevance}/10, ${sentiment}): "${article.title}"`);
+        }
+      }
+
+      console.log(`[SentimentService] OpenRouter analysis: ${relevantArticles.length}/${articlesToCheck.length} articles relevant`);
+      return relevantArticles;
+    } catch (error: any) {
+      console.error('[SentimentService] OpenRouter relevance filtering error:', error.message);
+      return this.fallbackContextualFilter(articles, context);
+    }
+  }
+
+  private fallbackContextualFilter(
+    articles: any[],
+    context: {
+      keyEntities: string[];
+      topic: string;
+    }
+  ): { article: any; relevance: number; sentimentLabel: 'positive' | 'negative' | 'neutral' }[] {
+    const relevantArticles: { article: any; relevance: number; sentimentLabel: 'positive' | 'negative' | 'neutral' }[] = [];
+    
+    for (const article of articles.slice(0, 10)) {
+      const title = (article.title || '').toLowerCase();
+      const description = (article.description || '').toLowerCase();
+      const content = title + ' ' + description;
+      
+      // Check if article mentions key entities
+      const entityMatches = context.keyEntities.filter(entity => 
+        content.includes(entity.toLowerCase())
+      ).length;
+      
+      // Check topic relevance
+      const topicWords = context.topic.toLowerCase().split(' ');
+      const topicMatches = topicWords.filter(word => 
+        word.length > 3 && content.includes(word)
+      ).length;
+      
+      // Score based on matches
+      const relevanceScore = entityMatches * 2 + topicMatches;
+      
+      if (relevanceScore >= 2) {
+        // Simple sentiment detection based on keywords
+        const positiveWords = ['positive', 'good', 'success', 'growth', 'up', 'rise', 'gain'];
+        const negativeWords = ['negative', 'bad', 'fail', 'decline', 'down', 'fall', 'loss'];
+        
+        const positiveCount = positiveWords.filter(word => content.includes(word)).length;
+        const negativeCount = negativeWords.filter(word => content.includes(word)).length;
+        
+        const sentiment = positiveCount > negativeCount ? 'positive' : 
+                         negativeCount > positiveCount ? 'negative' : 'neutral';
+        
+        relevantArticles.push({
+          article,
+          relevance: Math.min(10, relevanceScore + 5),
+          sentimentLabel: sentiment as 'positive' | 'negative' | 'neutral'
+        });
+      }
+    }
+    
+    return relevantArticles;
   }
 
   // ── STEP 4: AI-powered relevance filtering ───────────────────────────────
