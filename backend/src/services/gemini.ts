@@ -51,7 +51,7 @@ export async function chatCompletion(
   if (!client) throw new Error('Gemini API key not configured');
 
   const {
-    model = 'gemini-2.0-flash',
+    model = 'gemini-3.0-flash',
     temperature = 0.3,
     maxOutputTokens = 1024,
   } = opts;
