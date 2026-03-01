@@ -279,7 +279,7 @@ export default function DashboardPage() {
       )}
 
       {activeTab === 'history' && (
-        <TradingHistoryPanel userId={user.id} />
+        <TradingHistoryPanel />
       )}
 
       {activeTab === 'coach' && (

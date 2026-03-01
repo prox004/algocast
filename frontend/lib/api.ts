@@ -119,6 +119,13 @@ export interface Trade {
   amount: number;
   tokens: number;
   timestamp: number;
+  market_question?: string;
+  category?: string;
+  market_expiry?: number;
+  market_resolved?: boolean;
+  market_outcome?: 0 | 1 | null;
+  profit_loss?: number | null;
+  is_winner?: boolean | null;
 }
 
 export interface AIAnalysis {
@@ -275,6 +282,11 @@ export async function claimWinnings(market_id: string): Promise<{ success: boole
     method: 'POST',
     body: JSON.stringify({ market_id }),
   });
+}
+
+export async function getUserTrades(): Promise<Trade[]> {
+  const data = await request<{ trades: Trade[] }>('/markets/user-trades/me');
+  return data.trades;
 }
 
 export async function getMarketPriceGraph(market_id: string, days?: number): Promise<{ success: boolean; market: any; priceData: PriceGraph }> {

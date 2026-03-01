@@ -1,26 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatAlgo, formatProb } from '@/lib/api';
-
-interface Trade {
-  id: string;
-  market_id: string;
-  side: 'YES' | 'NO';
-  amount: number;
-  tokens: number;
-  timestamp: number;
-  market_question?: string;
-  profit_loss?: number;
-  is_winner?: boolean;
-  category?: string;
-}
+import { formatAlgo, formatProb, getUserTrades, type Trade } from '@/lib/api';
 
 interface Props {
-  userId: string;
+  // No props needed - gets trades for authenticated user
 }
 
-export default function TradingHistoryPanel({ userId }: Props) {
+export default function TradingHistoryPanel({}: Props) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -29,15 +16,13 @@ export default function TradingHistoryPanel({ userId }: Props) {
 
   useEffect(() => {
     loadTrades();
-  }, [userId]);
+  }, []);
 
   async function loadTrades() {
     try {
       setLoading(true);
-      // TODO: Implement real API endpoint for user trades
-      // For now, return empty array for new users - replace with: await getUserTrades(userId);
-      const trades: Trade[] = [];
-      setTrades(trades);
+      const userTrades = await getUserTrades();
+      setTrades(userTrades);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -87,7 +72,7 @@ export default function TradingHistoryPanel({ userId }: Props) {
   }
 
   const totalPnL = trades.reduce((sum, trade) => sum + (trade.profit_loss || 0), 0);
-  const winRate = trades.length > 0 ? trades.filter(t => t.is_winner).length / trades.length : 0;
+  const winRate = trades.length > 0 ? trades.filter(t => t.is_winner === true).length / trades.length : 0;
 
   return (
     <div className="space-y-6">
@@ -121,6 +106,15 @@ export default function TradingHistoryPanel({ userId }: Props) {
           <h3 className="font-semibold">Trading History</h3>
           
           <div className="flex items-center gap-4">
+            {/* Refresh Button */}
+            <button 
+              onClick={loadTrades}
+              disabled={loading}
+              className="btn-secondary text-sm"
+            >
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
+
             {/* Filter */}
             <select 
               value={filter} 
@@ -209,14 +203,16 @@ export default function TradingHistoryPanel({ userId }: Props) {
                     <td className="py-4 text-sm">{formatAlgo(trade.amount * 1000000)}</td>
                     <td className="py-4 text-sm">{trade.tokens.toFixed(3)}</td>
                     <td className="py-4">
-                      {trade.profit_loss !== undefined ? (
+                      {trade.profit_loss !== null && trade.profit_loss !== undefined ? (
                         <span className={`text-sm font-medium ${
                           trade.profit_loss >= 0 ? 'text-emerald-400' : 'text-red-400'
                         }`}>
                           {trade.profit_loss >= 0 ? '+' : ''}{formatAlgo(trade.profit_loss * 1000000)}
                         </span>
                       ) : (
-                        <span className="text-sm text-gray-500">Pending</span>
+                        <span className="text-sm text-yellow-400">
+                          {trade.market_resolved ? 'Calculating...' : 'Open'}
+                        </span>
                       )}
                     </td>
                     <td className="py-4 text-sm text-gray-400">
