@@ -2,6 +2,7 @@ import express from 'express';
 import { MarketAgent } from '../agents/marketAgent';
 import { AdvisorService } from '../services/advisor.service';
 import { getSentimentService } from '../services/sentiment.service';
+import { getPersonalizedAIService } from '../services/personalizedAI/personalizedAI.service';
 
 const router = express.Router();
 
@@ -24,16 +25,279 @@ const getAdvisorService = () => {
 };
 
 // Simple auth middleware type
-const auth = (req: any, res: any, next: any) => {
+const auth = (req: any, res: any, next: any): void => {
   // For now, just pass through - integrate with existing auth later
   next();
 };
 
-// ── Sentiment endpoint ───────────────────────────────────────────────────────
+// ── Personalized AI Endpoints ───────────────────────────────────────────────
 
 const db = require('../db');
 
-// GET /analysis/:market_id - Get AI analysis for specific market
+// ── Personalized AI Endpoints ───────────────────────────────────────────────
+
+// POST /ai/trading-coach - Get personalized trading advice
+router.post('/trading-coach', auth, async (req, res) => {
+  try {
+    const { user_id, timeframe_days } = req.body;
+    
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'user_id is required'
+      });
+    }
+
+    // Get user's trades from database
+    const userTrades = db.getTradesByUser(user_id);
+    
+    const personalizedAI = getPersonalizedAIService();
+    const analysis = personalizedAI.analyzeTradingPerformance({
+      user_id,
+      trades: userTrades,
+      timeframe_days: timeframe_days || 30
+    });
+
+    return res.json({
+      success: true,
+      analysis,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('[AI] Trading coach error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Trading coach analysis failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// POST /ai/market-recommendations - Get personalized market recommendations
+router.post('/market-recommendations', auth, async (req, res) => {
+  try {
+    const { user_id, max_recommendations } = req.body;
+    
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'user_id is required'
+      });
+    }
+
+    // Get user's trades and build profile
+    const userTrades = db.getTradesByUser(user_id);
+    const personalizedAI = getPersonalizedAIService();
+    const userProfile = personalizedAI.buildUserProfile(user_id, userTrades);
+
+    // Get available markets
+    const availableMarkets = db.getAllMarkets().filter((m: any) => !m.resolved);
+
+    const recommendations = personalizedAI.recommendMarkets({
+      user_id,
+      user_profile: userProfile,
+      available_markets: availableMarkets,
+      max_recommendations: max_recommendations || 5
+    });
+
+    return res.json({
+      success: true,
+      recommendations,
+      user_profile: userProfile,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('[AI] Market recommendations error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Market recommendations failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// POST /ai/position-sizing - Get optimal position size recommendation
+router.post('/position-sizing', auth, async (req, res) => {
+  try {
+    const { 
+      user_bankroll, 
+      risk_tolerance, 
+      ai_probability, 
+      market_probability,
+      market_category,
+      user_id 
+    } = req.body;
+
+    // Validate required fields
+    if (!user_bankroll || !risk_tolerance || ai_probability === undefined || market_probability === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'user_bankroll, risk_tolerance, ai_probability, and market_probability are required'
+      });
+    }
+
+    // Get user's category performance if user_id and category provided
+    let userCategoryPerformance;
+    if (user_id && market_category) {
+      const userTrades = db.getTradesByUser(user_id);
+      const personalizedAI = getPersonalizedAIService();
+      const userProfile = personalizedAI.buildUserProfile(user_id, userTrades);
+      userCategoryPerformance = userProfile.category_win_rates[market_category];
+    }
+
+    const personalizedAI = getPersonalizedAIService();
+    const sizing = personalizedAI.calculatePositionSize({
+      user_bankroll,
+      risk_tolerance,
+      ai_probability,
+      market_probability,
+      market_category,
+      user_category_performance: userCategoryPerformance
+    });
+
+    return res.json({
+      success: true,
+      sizing,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('[AI] Position sizing error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Position sizing calculation failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// POST /ai/exit-strategy - Get exit strategy recommendation
+router.post('/exit-strategy', auth, async (req, res) => {
+  try {
+    const { 
+      trade_id,
+      current_probability,
+      time_remaining_hours,
+      volatility_level,
+      ai_updated_probability 
+    } = req.body;
+
+    if (!trade_id || current_probability === undefined || !time_remaining_hours || !volatility_level || ai_updated_probability === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'trade_id, current_probability, time_remaining_hours, volatility_level, and ai_updated_probability are required'
+      });
+    }
+
+    // Get trade from database
+    const trade = db.trades.get(trade_id);
+    if (!trade) {
+      return res.status(404).json({
+        success: false,
+        error: 'Trade not found'
+      });
+    }
+
+    const personalizedAI = getPersonalizedAIService();
+    const strategy = personalizedAI.analyzeExitStrategy({
+      trade,
+      current_probability,
+      time_remaining_hours,
+      volatility_level,
+      ai_updated_probability
+    });
+
+    return res.json({
+      success: true,
+      strategy,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('[AI] Exit strategy error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Exit strategy analysis failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// POST /ai/weekly-performance - Get weekly performance analysis
+router.post('/weekly-performance', auth, async (req, res) => {
+  try {
+    const { user_id, week_start, week_end } = req.body;
+    
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'user_id is required'
+      });
+    }
+
+    // Default to current week if not specified
+    const weekEnd = week_end || Date.now();
+    const weekStart = week_start || (weekEnd - (7 * 24 * 60 * 60 * 1000));
+
+    // Get user's trades in the timeframe
+    const allTrades = db.getTradesByUser(user_id);
+    const weeklyTrades = allTrades.filter((t: any) => 
+      t.timestamp >= weekStart && t.timestamp <= weekEnd
+    );
+
+    const personalizedAI = getPersonalizedAIService();
+    const performance = personalizedAI.analyzeWeeklyPerformance({
+      user_id,
+      weekly_trades: weeklyTrades,
+      week_start: weekStart,
+      week_end: weekEnd
+    });
+
+    return res.json({
+      success: true,
+      performance,
+      week_start: weekStart,
+      week_end: weekEnd,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('[AI] Weekly performance error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Weekly performance analysis failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// GET /ai/comprehensive-analysis/:user_id - Get full personalized analysis
+router.get('/comprehensive-analysis/:user_id', auth, async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    
+    // Get user's trades
+    const userTrades = db.getTradesByUser(user_id);
+    
+    // Get available markets
+    const availableMarkets = db.getAllMarkets().filter((m: any) => !m.resolved);
+
+    const personalizedAI = getPersonalizedAIService();
+    const analysis = personalizedAI.getComprehensiveAnalysis(user_id, userTrades, availableMarkets);
+
+    return res.json({
+      success: true,
+      analysis,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('[AI] Comprehensive analysis error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Comprehensive analysis failed',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// ── Existing Endpoints ──────────────────────────────────────────────────────
 router.get('/analysis/:market_id', async (req, res) => {
   try {
     const marketId = req.params.market_id;
