@@ -56,6 +56,17 @@ router.get('/', (_req, res) => {
   return res.json({ markets });
 });
 
+// GET /markets/user-orders/me (protected) — MUST be before /:id
+router.get('/user-orders/me', requireAuth, (req, res) => {
+  try {
+    const orders = db.getOrdersByUser(req.user.id);
+    return res.json({ orders });
+  } catch (err) {
+    console.error('[user-orders]', err.message);
+    return res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
 // GET /markets/:id
 router.get('/:id', (req, res) => {
   const market = db.getMarketById(req.params.id);

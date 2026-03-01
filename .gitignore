@@ -21,6 +21,9 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 castalgo.db-wal
+castalgo.db-shm
+*.db-shm
+*.db-wal
 
 # IDE
 .vscode/
