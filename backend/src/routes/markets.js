@@ -68,6 +68,7 @@ router.get('/user-orders/me', requireAuth, (req, res) => {
 });
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 // GET /markets/user-trades/me (protected) — get current user's trades
 router.get('/user-trades/me', requireAuth, (req, res) => {
   try {
@@ -121,6 +122,8 @@ function isTradeWinner(trade, market) {
          (trade.side === 'NO' && market.outcome === 0);
 }
 
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
 // GET /markets/:id
