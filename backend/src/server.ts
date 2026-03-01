@@ -7,6 +7,9 @@ import cors from 'cors';
 import session from 'express-session';
 import aiRoutes from './routes/ai';
 import dbMarketsRoutes from './routes/markets'; // New TypeScript DB routes
+import adminAuthRoutes from './routes/adminAuth';
+import adminRoutes from './routes/admin';
+import disputeRoutes from './routes/dispute';
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
 import { getAutoMarketGeneratorService } from './services/autoMarketGenerator.service';
 
@@ -96,6 +99,9 @@ app.use('/wallet', walletRoutes);
 app.use('/markets/db', dbMarketsRoutes); // New database query routes
 app.use('/markets', legacyMarketsRoutes); // Legacy trading routes
 app.use('/ai', aiRoutes);
+app.use('/admin', adminAuthRoutes);       // Admin authentication (login)
+app.use('/admin', adminRoutes);           // Admin governance (resolution, disputes)
+app.use('/dispute', disputeRoutes);       // User dispute flagging
 
 // 404 handler
 app.use(notFoundHandler);

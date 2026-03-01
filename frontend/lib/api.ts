@@ -102,6 +102,7 @@ export interface Market {
   yes_reserve: number;
   no_reserve: number;
   resolved: boolean;
+  status?: string;
   outcome: 0 | 1 | null;
   ticker?: string | null;
   asset_type?: 'stock' | 'crypto' | 'commodity' | null;
@@ -285,11 +286,56 @@ export async function getMarketCurrentPrice(market_id: string): Promise<{ succes
   return request(`/markets/${market_id}/current-price`);
 }
 
-export async function resolveMarket(market_id: string, outcome: 0 | 1): Promise<{ success: boolean }> {
-  return request('/markets/resolve', {
+// resolveMarket removed — resolution is admin-only (2-of-3 multisig)
+
+// ── Order Book ───────────────────────────────────────────────────────────────
+
+export interface OrderBookLevel {
+  price: number;
+  amount: number;
+}
+
+export interface OrderBook {
+  market_id: string;
+  probability: number;
+  yes: OrderBookLevel[];
+  no: OrderBookLevel[];
+}
+
+export interface Order {
+  id: string;
+  market_id: string;
+  user_id: string;
+  side: 'YES' | 'NO';
+  price: number;
+  amount: number;
+  filled: number;
+  status: 'open' | 'filled' | 'cancelled';
+  created_at: number;
+}
+
+export async function getOrderBook(market_id: string): Promise<OrderBook> {
+  return request(`/markets/${market_id}/orderbook`);
+}
+
+export async function placeOrder(
+  market_id: string,
+  side: 'YES' | 'NO',
+  price: number,
+  amount: number,
+): Promise<{ success: boolean; order: Order; fills: any[] }> {
+  return request('/markets/place-order', {
     method: 'POST',
-    body: JSON.stringify({ market_id, outcome }),
+    body: JSON.stringify({ market_id, side, price, amount }),
   });
+}
+
+export async function cancelOrder(orderId: string): Promise<{ success: boolean; refunded: number }> {
+  return request(`/markets/cancel-order/${orderId}`, { method: 'DELETE' });
+}
+
+export async function getUserOrders(): Promise<{ orders: Order[] }> {
+  return request('/markets/user-orders/me');
 }
 
 // ── AI ───────────────────────────────────────────────────────────────────────

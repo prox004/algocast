@@ -18,6 +18,7 @@ KEY_NO_RESERVE  = pt.Bytes("no_reserve")
 KEY_RESOLVED    = pt.Bytes("resolved")
 KEY_OUTCOME     = pt.Bytes("outcome")
 KEY_CREATOR     = pt.Bytes("creator")
+KEY_MULTISIG    = pt.Bytes("multisig")
 
 
 # ── Guard helpers ─────────────────────────────────────────────────────────────
@@ -43,6 +44,17 @@ def assert_creator(caller: pt.Expr) -> pt.Expr:
     return pt.Assert(
         caller == pt.App.globalGet(KEY_CREATOR),
         comment="only creator may call this",
+    )
+
+
+def assert_resolver(caller: pt.Expr) -> pt.Expr:
+    """Abort if caller is neither the creator nor the multisig address."""
+    return pt.Assert(
+        pt.Or(
+            caller == pt.App.globalGet(KEY_CREATOR),
+            caller == pt.App.globalGet(KEY_MULTISIG),
+        ),
+        comment="only creator or multisig may resolve",
     )
 
 
@@ -129,11 +141,11 @@ def handle_resolve(outcome: pt.Expr, caller: pt.Expr) -> pt.Expr:
     """
     Mark market as resolved.
       - outcome : 1 = YES wins, 0 = NO wins
-      - caller  : must be creator
+      - caller  : must be creator OR multisig address (2-of-3 admin)
     Can only be called after close_ts.
     """
     return pt.Seq(
-        assert_creator(caller),
+        assert_resolver(caller),
         assert_not_resolved(),
         pt.Assert(
             pt.Global.latest_timestamp() >= pt.App.globalGet(KEY_CLOSE_TS),

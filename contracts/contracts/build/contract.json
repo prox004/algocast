@@ -11,12 +11,16 @@
         {
           "type": "uint64",
           "name": "close_ts"
+        },
+        {
+          "type": "address",
+          "name": "multisig_addr"
         }
       ],
       "returns": {
         "type": "void"
       },
-      "desc": "Called once after deployment to initialise state and mint YES/NO ASAs.\nProtected by a close_ts == 0 guard so it can never be called twice."
+      "desc": "Called once after deployment to initialise state and mint YES/NO ASAs.\nProtected by a close_ts == 0 guard so it can never be called twice. multisig_addr: the 2-of-3 admin multisig address authorised to resolve."
     },
     {
       "name": "buy_yes",

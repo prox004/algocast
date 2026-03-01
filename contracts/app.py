@@ -55,6 +55,7 @@ from market_logic import (
     KEY_RESOLVED,
     KEY_OUTCOME,
     KEY_CREATOR,
+    KEY_MULTISIG,
     handle_buy_yes,
     handle_buy_no,
     handle_resolve,
@@ -79,10 +80,12 @@ router = pt.Router(
 def create_market(
     question: pt.abi.String,
     close_ts: pt.abi.Uint64,
+    multisig_addr: pt.abi.Address,
 ) -> pt.Expr:
     """
     Called once after deployment to initialise state and mint YES/NO ASAs.
     Protected by a close_ts == 0 guard so it can never be called twice.
+    multisig_addr: the 2-of-3 admin multisig address authorised to resolve.
     """
     app_addr = pt.Global.current_application_address()
 
@@ -96,6 +99,7 @@ def create_market(
 
         # Store market metadata
         pt.App.globalPut(KEY_CREATOR,   pt.Txn.sender()),
+        pt.App.globalPut(KEY_MULTISIG,  multisig_addr.get()),
         pt.App.globalPut(KEY_QUESTION,  question.get()),
         pt.App.globalPut(KEY_CLOSE_TS,  close_ts.get()),
         pt.App.globalPut(KEY_YES_RESERVE, pt.Int(0)),

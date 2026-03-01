@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getMarket,
   claimWinnings,
-  resolveMarket,
   getToken,
   formatAlgo,
   formatProb,
@@ -18,6 +17,7 @@ import BuyPanel from '@/components/BuyPanel';
 import AIInsightPanel from '@/components/AIInsightPanel';
 import SentimentPanel from '@/components/SentimentPanel';
 import PriceChart from '@/components/PriceChart';
+import OrderBook from '@/components/OrderBook';
 
 export default function MarketDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -27,7 +27,6 @@ export default function MarketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [claimMsg, setClaimMsg] = useState('');
-  const [resolveMsg, setResolveMsg] = useState('');
   const [buySheet, setBuySheet] = useState<'YES' | 'NO' | null>(null);
 
   const isLoggedIn = Boolean(getToken());
@@ -61,17 +60,6 @@ export default function MarketDetailPage() {
       refresh();
     } catch (e: any) {
       setClaimMsg(e.message);
-    }
-  }
-
-  async function handleResolve(outcome: 0 | 1) {
-    if (!market) return;
-    try {
-      await resolveMarket(market.id, outcome);
-      setResolveMsg('Market resolved!');
-      refresh();
-    } catch (e: any) {
-      setResolveMsg(e.message);
     }
   }
 
@@ -232,21 +220,13 @@ export default function MarketDetailPage() {
         </div>
       )}
 
-      {/* Resolve */}
-      {isLoggedIn && !market.resolved && (
-        <div className="card">
-          <h2 className="font-semibold mb-3 text-yellow-400 text-sm">Resolve Market</h2>
-          <div className="flex gap-3">
-            <button onClick={() => handleResolve(1)} className="btn-primary flex-1 text-sm">
-              Resolve YES
-            </button>
-            <button onClick={() => handleResolve(0)} className="btn-secondary flex-1 text-sm">
-              Resolve NO
-            </button>
-          </div>
-          {resolveMsg && <p className="text-sm mt-2 text-gray-300">{resolveMsg}</p>}
-        </div>
-      )}
+      {/* Order Book */}
+      <OrderBook
+        marketId={market.id}
+        resolved={market.resolved}
+        expired={expired}
+        isLoggedIn={isLoggedIn}
+      />
 
       {/* ── Sticky bottom buy bar ── */}
       {canTrade && (

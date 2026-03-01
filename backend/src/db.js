@@ -203,6 +203,86 @@ try {
   try { sqlite.exec('ALTER TABLE markets ADD COLUMN volume INTEGER DEFAULT 0;'); } catch (e) {}
 }
 
+// ── Resolution & Admin Governance Tables ────────────────────────────────────
+
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS admins (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    hashed_password TEXT NOT NULL,
+    algorand_address TEXT UNIQUE NOT NULL,
+    encrypted_private_key TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_admins_email ON admins(email);
+
+  CREATE TABLE IF NOT EXISTS resolution_proposals (
+    id TEXT PRIMARY KEY,
+    market_id TEXT NOT NULL,
+    proposed_outcome INTEGER NOT NULL,
+    proposer_admin_id TEXT NOT NULL,
+    signatures_collected TEXT DEFAULT '[]',
+    multisig_txn_blob TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING_SIGNATURES',
+    evidence TEXT,
+    resolution_hash TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (market_id) REFERENCES markets(id),
+    FOREIGN KEY (proposer_admin_id) REFERENCES admins(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_resolution_proposals_market ON resolution_proposals(market_id);
+  CREATE INDEX IF NOT EXISTS idx_resolution_proposals_status ON resolution_proposals(status);
+
+  CREATE TABLE IF NOT EXISTS disputes (
+    id TEXT PRIMARY KEY,
+    market_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (market_id) REFERENCES markets(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_disputes_market ON disputes(market_id);
+`);
+
+// Add resolution-related columns to markets table
+try {
+  sqlite.prepare('SELECT resolution_timestamp FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding resolution columns');
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN resolution_timestamp INTEGER;'); } catch (e) {}
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN resolution_evidence TEXT;'); } catch (e) {}
+  try { sqlite.exec('ALTER TABLE markets ADD COLUMN dispute_flag INTEGER DEFAULT 0;'); } catch (e) {}
+}
+
+// ── Order Book Table ────────────────────────────────────────────────────────
+
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    market_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    side TEXT NOT NULL,
+    price REAL NOT NULL,
+    amount INTEGER NOT NULL,
+    filled INTEGER DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (market_id) REFERENCES markets(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_orders_market ON orders(market_id);
+  CREATE INDEX IF NOT EXISTS idx_orders_market_side ON orders(market_id, side, status);
+  CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+`);
+
+console.log('[SQLite] Admin, Resolution & Order Book tables initialized');
+
 // ── Prepared Statements ─────────────────────────────────────────────────────
 
 const statements = {
@@ -253,6 +333,62 @@ const statements = {
     VALUES (?, ?, ?, ?, ?)
   `),
   findClaim: sqlite.prepare('SELECT * FROM claims WHERE user_id = ? AND market_id = ?'),
+
+  // Admins
+  insertAdmin: sqlite.prepare(`
+    INSERT INTO admins (id, email, hashed_password, algorand_address, encrypted_private_key, role, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `),
+  getAdminById: sqlite.prepare('SELECT * FROM admins WHERE id = ?'),
+  getAdminByEmail: sqlite.prepare('SELECT * FROM admins WHERE email = ?'),
+  getAllAdmins: sqlite.prepare('SELECT id, email, algorand_address, role, created_at FROM admins'),
+
+  // Resolution Proposals
+  insertProposal: sqlite.prepare(`
+    INSERT INTO resolution_proposals (id, market_id, proposed_outcome, proposer_admin_id, signatures_collected, multisig_txn_blob, status, evidence, resolution_hash, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  getProposalById: sqlite.prepare('SELECT * FROM resolution_proposals WHERE id = ?'),
+  getProposalsByMarket: sqlite.prepare('SELECT * FROM resolution_proposals WHERE market_id = ? ORDER BY created_at DESC'),
+  getPendingProposals: sqlite.prepare("SELECT * FROM resolution_proposals WHERE status = 'PENDING_SIGNATURES' ORDER BY created_at DESC"),
+  updateProposal: sqlite.prepare(`
+    UPDATE resolution_proposals SET signatures_collected = ?, multisig_txn_blob = ?, status = ? WHERE id = ?
+  `),
+
+  // Disputes
+  insertDispute: sqlite.prepare(`
+    INSERT INTO disputes (id, market_id, user_id, reason, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `),
+  getDisputesByMarket: sqlite.prepare('SELECT * FROM disputes WHERE market_id = ? ORDER BY created_at DESC'),
+  getDisputedMarkets: sqlite.prepare(`
+    SELECT DISTINCT m.* FROM markets m
+    INNER JOIN disputes d ON m.id = d.market_id
+    WHERE m.dispute_flag = 1
+    ORDER BY m.created_at DESC
+  `),
+
+  // Orders (order book)
+  insertOrder: sqlite.prepare(`
+    INSERT INTO orders (id, market_id, user_id, side, price, amount, filled, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  getOrderById: sqlite.prepare('SELECT * FROM orders WHERE id = ?'),
+  getOpenOrdersByMarket: sqlite.prepare("SELECT * FROM orders WHERE market_id = ? AND status = 'open' ORDER BY price DESC, created_at ASC"),
+  getOpenOrdersByMarketSide: sqlite.prepare("SELECT * FROM orders WHERE market_id = ? AND side = ? AND status = 'open' ORDER BY CASE WHEN side = 'YES' THEN -price ELSE price END, created_at ASC"),
+  updateOrderFilled: sqlite.prepare('UPDATE orders SET filled = ?, status = ? WHERE id = ?'),
+  cancelOrder: sqlite.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND user_id = ? AND status = 'open'"),
+  getOrdersByUser: sqlite.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC'),
+
+  // Market resolution queries
+  getActiveMarkets: sqlite.prepare("SELECT * FROM markets WHERE status = 'active' ORDER BY created_at DESC"),
+  getClosedMarkets: sqlite.prepare("SELECT * FROM markets WHERE status = 'CLOSED' ORDER BY created_at DESC"),
+  updateMarketResolution: sqlite.prepare(`
+    UPDATE markets SET status = ?, outcome = ?, resolution_timestamp = ?, resolution_evidence = ? WHERE id = ?
+  `),
+  updateMarketDisputeFlag: sqlite.prepare(`
+    UPDATE markets SET dispute_flag = ? WHERE id = ?
+  `),
 };
 
 // ── Database Interface ──────────────────────────────────────────────────────
@@ -419,6 +555,223 @@ const db = {
 
   findClaim(userId, marketId) {
     return statements.findClaim.get(userId, marketId) || null;
+  },
+
+  // ── Admins ─────────────────────────────────────────────────────────────────
+
+  createAdmin(admin) {
+    try {
+      statements.insertAdmin.run(
+        admin.id,
+        admin.email.toLowerCase(),
+        admin.hashed_password,
+        admin.algorand_address,
+        admin.encrypted_private_key,
+        admin.role || 'admin',
+        Date.now()
+      );
+      return admin;
+    } catch (err) {
+      console.error('[db.createAdmin]', err.message);
+      throw err;
+    }
+  },
+
+  getAdminById(id) {
+    return statements.getAdminById.get(id) || null;
+  },
+
+  getAdminByEmail(email) {
+    return statements.getAdminByEmail.get(email.toLowerCase()) || null;
+  },
+
+  getAllAdmins() {
+    return statements.getAllAdmins.all();
+  },
+
+  // ── Resolution Proposals ───────────────────────────────────────────────────
+
+  createProposal(proposal) {
+    try {
+      statements.insertProposal.run(
+        proposal.id,
+        proposal.market_id,
+        proposal.proposed_outcome,
+        proposal.proposer_admin_id,
+        JSON.stringify(proposal.signatures_collected || []),
+        proposal.multisig_txn_blob || null,
+        proposal.status || 'PENDING_SIGNATURES',
+        proposal.evidence || null,
+        proposal.resolution_hash || null,
+        Date.now()
+      );
+      return proposal;
+    } catch (err) {
+      console.error('[db.createProposal]', err.message);
+      throw err;
+    }
+  },
+
+  getProposalById(id) {
+    const row = statements.getProposalById.get(id);
+    if (!row) return null;
+    row.signatures_collected = JSON.parse(row.signatures_collected || '[]');
+    return row;
+  },
+
+  getProposalsByMarket(marketId) {
+    const rows = statements.getProposalsByMarket.all(marketId);
+    return rows.map(r => {
+      r.signatures_collected = JSON.parse(r.signatures_collected || '[]');
+      return r;
+    });
+  },
+
+  getPendingProposals() {
+    const rows = statements.getPendingProposals.all();
+    return rows.map(r => {
+      r.signatures_collected = JSON.parse(r.signatures_collected || '[]');
+      return r;
+    });
+  },
+
+  updateProposal(id, updates) {
+    statements.updateProposal.run(
+      JSON.stringify(updates.signatures_collected || []),
+      updates.multisig_txn_blob || null,
+      updates.status,
+      id
+    );
+    return this.getProposalById(id);
+  },
+
+  // ── Disputes ───────────────────────────────────────────────────────────────
+
+  createDispute(dispute) {
+    try {
+      statements.insertDispute.run(
+        dispute.id,
+        dispute.market_id,
+        dispute.user_id,
+        dispute.reason,
+        Date.now()
+      );
+      // Set dispute_flag on the market
+      statements.updateMarketDisputeFlag.run(1, dispute.market_id);
+      return dispute;
+    } catch (err) {
+      console.error('[db.createDispute]', err.message);
+      throw err;
+    }
+  },
+
+  getDisputesByMarket(marketId) {
+    return statements.getDisputesByMarket.all(marketId);
+  },
+
+  getDisputedMarkets() {
+    return statements.getDisputedMarkets.all();
+  },
+
+  // ── Market Resolution Helpers ──────────────────────────────────────────────
+
+  resolveMarket(id, outcome, evidence) {
+    statements.updateMarketResolution.run('RESOLVED', outcome, Date.now(), evidence || null, id);
+    return this.getMarketById(id);
+  },
+
+  closeMarket(id) {
+    statements.updateMarketResolution.run('CLOSED', null, null, null, id);
+    return this.getMarketById(id);
+  },
+
+  getActiveMarketsOnly() {
+    return statements.getActiveMarkets.all();
+  },
+
+  getClosedMarketsOnly() {
+    return statements.getClosedMarkets.all();
+  },
+
+  // ── Orders (Order Book) ────────────────────────────────────────────────────
+
+  createOrder(order) {
+    try {
+      statements.insertOrder.run(
+        order.id,
+        order.market_id,
+        order.user_id,
+        order.side,
+        order.price,
+        order.amount,
+        order.filled || 0,
+        order.status || 'open',
+        Date.now()
+      );
+      return order;
+    } catch (err) {
+      console.error('[db.createOrder]', err.message);
+      throw err;
+    }
+  },
+
+  getOrderById(id) {
+    return statements.getOrderById.get(id) || null;
+  },
+
+  getOpenOrdersByMarket(marketId) {
+    return statements.getOpenOrdersByMarket.all(marketId);
+  },
+
+  getOpenOrdersByMarketSide(marketId, side) {
+    return statements.getOpenOrdersByMarketSide.all(marketId, side);
+  },
+
+  updateOrderFilled(id, filled, status) {
+    statements.updateOrderFilled.run(filled, status, id);
+    return this.getOrderById(id);
+  },
+
+  cancelOrder(id, userId) {
+    statements.cancelOrder.run(id, userId);
+    return this.getOrderById(id);
+  },
+
+  getOrdersByUser(userId) {
+    return statements.getOrdersByUser.all(userId);
+  },
+
+  /**
+   * Get aggregated order book for a market.
+   * Returns YES bids and NO bids grouped by price level.
+   */
+  getOrderBook(marketId) {
+    const orders = this.getOpenOrdersByMarket(marketId);
+    const yesBids = {};
+    const noBids = {};
+
+    for (const order of orders) {
+      const remaining = order.amount - order.filled;
+      if (remaining <= 0) continue;
+
+      const priceKey = order.price.toFixed(2);
+      if (order.side === 'YES') {
+        yesBids[priceKey] = (yesBids[priceKey] || 0) + remaining;
+      } else {
+        noBids[priceKey] = (noBids[priceKey] || 0) + remaining;
+      }
+    }
+
+    // Sort YES bids descending (highest bid first), NO bids ascending
+    const yesLevels = Object.entries(yesBids)
+      .map(([price, amount]) => ({ price: parseFloat(price), amount }))
+      .sort((a, b) => b.price - a.price);
+
+    const noLevels = Object.entries(noBids)
+      .map(([price, amount]) => ({ price: parseFloat(price), amount }))
+      .sort((a, b) => a.price - b.price);
+
+    return { yes: yesLevels, no: noLevels };
   },
 
   // ── Utility ────────────────────────────────────────────────────────────────

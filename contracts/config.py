@@ -49,7 +49,7 @@ ASA_TOTAL_SUPPLY = 1_000_000_000  # 1 billion smallest units
 ASA_DECIMALS = 0
 
 # Global state byte-slices used by the contract (schema declaration)
-GLOBAL_BYTES   = 2   # question, creator
+GLOBAL_BYTES   = 3   # question, creator, multisig
 GLOBAL_INTS    = 7   # close_ts, yes_asa_id, no_asa_id, yes_reserve, no_reserve, resolved, outcome
 
 # Local state (per-user opt-in) — not used in custodial model, keep minimal

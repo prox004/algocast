@@ -4,7 +4,7 @@ int 0
 ==
 bnz main_l12
 txna ApplicationArgs 0
-method "create_market(string,uint64)void"
+method "create_market(string,uint64,address)void"
 ==
 bnz main_l11
 txna ApplicationArgs 0
@@ -106,26 +106,26 @@ retsub
 
 // create_market
 createmarket_1:
-proto 2 0
+proto 3 0
 byte "close_ts"
 app_global_get
 int 0
 ==
 // already initialized
 assert
-frame_dig -1
+frame_dig -2
 global LatestTimestamp
 >
 // close_ts must be future
 assert
-frame_dig -2
+frame_dig -3
 extract 2 0
 len
 int 0
 >
 // question cannot be empty
 assert
-frame_dig -2
+frame_dig -3
 extract 2 0
 len
 int 128
@@ -135,12 +135,15 @@ assert
 byte "creator"
 txn Sender
 app_global_put
+byte "multisig"
+frame_dig -1
+app_global_put
 byte "question"
-frame_dig -2
+frame_dig -3
 extract 2 0
 app_global_put
 byte "close_ts"
-frame_dig -1
+frame_dig -2
 app_global_put
 byte "yes_reserve"
 int 0
@@ -342,7 +345,12 @@ txn Sender
 byte "creator"
 app_global_get
 ==
-// only creator may call this
+txn Sender
+byte "multisig"
+app_global_get
+==
+||
+// only creator or multisig may resolve
 assert
 byte "resolved"
 app_global_get
@@ -468,13 +476,17 @@ createmarketcaster_6:
 proto 0 0
 byte ""
 int 0
+byte ""
 txna ApplicationArgs 1
 frame_bury 0
 txna ApplicationArgs 2
 btoi
 frame_bury 1
+txna ApplicationArgs 3
+frame_bury 2
 frame_dig 0
 frame_dig 1
+frame_dig 2
 callsub createmarket_1
 retsub
 
