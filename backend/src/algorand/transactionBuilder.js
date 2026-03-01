@@ -90,6 +90,7 @@ async function broadcast(signedTxns) {
 async function signBuyGroup(side, params) {
   const { fromAddress, encryptedKey, appId, appAddress, asaId, amountMicroAlgos } = params;
   if (amountMicroAlgos <= 0) throw new Error('amountMicroAlgos must be > 0');
+  if (!asaId || asaId <= 0) throw new Error(`Invalid asaId for ${side} buy: ${asaId}. Market may have null yes_asa_id/no_asa_id — sync from chain first.`);
 
   const algod      = getAlgodClient();
   const sp         = await algod.getTransactionParams().do();
@@ -116,7 +117,10 @@ async function signBuyGroup(side, params) {
     sender:          fromAddress,
     suggestedParams: { ...sp, fee: 2000, flatFee: true },
     signer,
-    foreignAssets:   [asaId],
+    // Both ASAs must be declared so the contract can reference YES and NO in global state.
+    // Filter out null/0 to prevent algosdk from silently producing empty foreignAssets.
+    foreignAssets:   [asaId].filter((id) => id != null && id > 0),
+    foreignAccounts: [fromAddress],  // buyer account must be accessible for inner ASA transfer
   });
 
   const built = atc.buildGroup();

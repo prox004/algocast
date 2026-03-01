@@ -104,6 +104,8 @@ export interface Market {
   resolved: boolean;
   status?: string;
   outcome: 0 | 1 | null;
+  result?: 'yes' | 'no' | null;          // TEXT column (database.service path)
+  uma_status?: string | null;             // UMA Protocol state
   ticker?: string | null;
   asset_type?: 'stock' | 'crypto' | 'commodity' | null;
   tweet_id?: string | null;
@@ -354,6 +356,12 @@ export async function claimWinnings(market_id: string): Promise<{ success: boole
 export async function getUserTrades(): Promise<Trade[]> {
   const data = await request<{ trades: Trade[] }>('/markets/user-trades/me');
   return data.trades;
+}
+
+/** Get only the user's trades for a specific market (filters client-side from the full trade list) */
+export async function getUserTradesForMarket(marketId: string): Promise<Trade[]> {
+  const trades = await getUserTrades();
+  return trades.filter((t) => t.market_id === marketId);
 }
 
 export async function getMarketPriceGraph(market_id: string, days?: number): Promise<{ success: boolean; market: any; priceData: PriceGraph }> {

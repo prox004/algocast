@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { getToken } from '@/lib/api';
+import { getToken, getUserTradesForMarket } from '@/lib/api';
 
 /**
  * UMA Protocol Status & Dispute Panel
@@ -64,6 +64,8 @@ export default function UmaDisputePanel({ marketId }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState('');
   const [timeRemaining, setTimeRemaining] = useState(0);
+  // Sides the logged-in user has traded on this market (for dispute eligibility)
+  const [userSides, setUserSides] = useState<Set<string>>(new Set());
 
   const isLoggedIn = Boolean(getToken());
 
@@ -97,6 +99,17 @@ export default function UmaDisputePanel({ marketId }: Props) {
     const interval = setInterval(fetchUmaStatus, 10000);
     return () => clearInterval(interval);
   }, [fetchUmaStatus]);
+
+  // Fetch user's trade positions for dispute eligibility
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    getUserTradesForMarket(marketId)
+      .then((trades) => {
+        const sides = new Set(trades.map((t) => t.side));
+        setUserSides(sides);
+      })
+      .catch(() => {});
+  }, [marketId, isLoggedIn]);
 
   // Countdown timer
   useEffect(() => {
@@ -187,30 +200,41 @@ export default function UmaDisputePanel({ marketId }: Props) {
             </p>
           </div>
 
-          {/* Raise dispute form */}
+          {/* Raise dispute form — only shown to users whose bet conflicts with the proposed outcome */}
           {isLoggedIn && timeRemaining > 0 && (
-            <div className="space-y-2">
-              <textarea
-                value={disputeReason}
-                onChange={(e) => setDisputeReason(e.target.value)}
-                placeholder="Why do you disagree with this resolution?"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 placeholder-gray-500 resize-none"
-                rows={2}
-                maxLength={500}
-              />
-              <button
-                onClick={handleRaiseDispute}
-                disabled={submitting || !disputeReason.trim()}
-                className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold text-sm transition-colors"
-              >
-                {submitting ? 'Raising Dispute...' : '⚠️ Raise UMA Dispute'}
-              </button>
-              {submitMsg && (
-                <p className={`text-xs ${submitMsg.includes('raised') ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {submitMsg}
+            userSides.has(uma.proposed_outcome === 1 ? 'NO' : 'YES') ? (
+              <div className="space-y-2">
+                <p className="text-xs text-amber-400/80">
+                  You bet <span className="font-bold">{uma.proposed_outcome === 1 ? 'NO' : 'YES'}</span> — you can dispute this resolution.
                 </p>
-              )}
-            </div>
+                <textarea
+                  value={disputeReason}
+                  onChange={(e) => setDisputeReason(e.target.value)}
+                  placeholder="Why do you disagree with this resolution?"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-sm text-gray-200 placeholder-gray-500 resize-none"
+                  rows={2}
+                  maxLength={500}
+                />
+                <button
+                  onClick={handleRaiseDispute}
+                  disabled={submitting || !disputeReason.trim()}
+                  className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold text-sm transition-colors"
+                >
+                  {submitting ? 'Raising Dispute...' : '⚠️ Raise UMA Dispute'}
+                </button>
+                {submitMsg && (
+                  <p className={`text-xs ${submitMsg.includes('raised') ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {submitMsg}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 text-center">
+                {userSides.size === 0
+                  ? 'You have no position on this market'
+                  : `You bet ${uma.proposed_outcome === 1 ? 'YES' : 'NO'} — the proposed outcome matches your position`}
+              </p>
+            )
           )}
 
           {!isLoggedIn && (
