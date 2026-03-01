@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import { chatCompletion, isGeminiReady } from './gemini';
 
 interface ProbabilityRequest {
   question: string;
@@ -27,17 +27,9 @@ interface ProbabilityEstimate {
 }
 
 export class ProbabilityService {
-  private openai?: OpenAI;
-
   constructor() {
-    const apiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-    if (apiKey) {
-      this.openai = new OpenAI({ 
-        apiKey,
-        baseURL: process.env.OPENROUTER_API_KEY ? 'https://openrouter.ai/api/v1' : undefined
-      });
-    } else {
-      console.warn('No AI API key set, using fallback probability estimation');
+    if (!isGeminiReady()) {
+      console.warn('No GEMINI_API_KEY set, using fallback probability estimation');
     }
   }
 
@@ -134,7 +126,7 @@ export class ProbabilityService {
   }
 
   private async getAIProbability(request: ProbabilityRequest): Promise<number> {
-    if (!this.openai) {
+    if (!isGeminiReady()) {
       return 0.5; // Default neutral probability
     }
 
@@ -156,9 +148,8 @@ Respond with only a number between 0 and 1 (e.g., 0.65 for 65% probability).
 `;
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: process.env.OPENROUTER_API_KEY ? 'meta-llama/llama-3.1-8b-instruct' : 'gpt-4',
-        messages: [
+      const content = await chatCompletion(
+        [
           {
             role: 'system',
             content: 'You are a probability estimation expert. Analyze the given information and provide a single probability number between 0 and 1.'
@@ -168,22 +159,14 @@ Respond with only a number between 0 and 1 (e.g., 0.65 for 65% probability).
             content: prompt
           }
         ],
-        temperature: 0.3,
-        max_tokens: 50
-      });
+        { temperature: 0.3, maxOutputTokens: 50 }
+      );
 
-      const content = response.choices[0]?.message?.content?.trim();
       const probability = parseFloat(content || '0.5');
       
       return Math.max(0, Math.min(1, probability));
     } catch (error) {
       console.error('Error getting AI probability:', error);
-      // If it's an auth error, log helpful message
-      if (error instanceof Error && error.message.includes('401')) {
-        console.error('⚠️  OpenRouter API authentication failed. Please check your OPENROUTER_API_KEY in .env');
-      } else if (error instanceof Error && error.message.includes('404')) {
-        console.error('⚠️  AI model not found. Please check the model name is correct and available.');
-      }
       return 0.5; // Default neutral probability
     }
   }

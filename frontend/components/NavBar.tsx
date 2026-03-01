@@ -37,7 +37,7 @@ export default function NavBar() {
     { href: '/', label: 'Markets' },
     ...(user ? [
       { href: '/dashboard', label: 'Dashboard' },
-      { href: '/wallet', label: 'Wallet' }
+      { href: '/profile', label: 'Profile' }
     ] : []),
   ];
 

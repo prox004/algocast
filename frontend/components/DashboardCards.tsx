@@ -402,7 +402,7 @@ function NewsCard() {
             href={item.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-2 text-sm font-semibold text-white leading-snug hover:text-orange-300 transition-colors line-clamp-3"
+            className="mt-2 text-m font-semibold text-white leading-snug hover:text-orange-300 transition-colors line-clamp-3"
           >
             {item.title}
           </a>
@@ -416,7 +416,7 @@ function NewsCard() {
 
           {/* Decorative bar */}
           <div className="mt-auto">
-            <div className="mt-3 h-px w-full rounded" style={{ background: 'rgba(251,146,60,0.15)' }} />
+            {/* <div className="mt-3 h-px w-full rounded" style={{ background: 'rgba(251,146,60,0.15)' }} /> */}
             <Dots count={news.length} active={idx} onDot={goTo} accent="#fb923c" />
           </div>
         </div>

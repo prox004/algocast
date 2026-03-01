@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import { chatCompletion, isGeminiReady } from './gemini';
 
 interface MarketRequest {
   trend: string;
@@ -9,158 +9,145 @@ interface MarketRequest {
 interface GeneratedMarket {
   question: string;
   data_source: string;
+  resolution_source?: string;
   expiry: string;
   ai_probability: number;
   confidence: string;
   reasoning: string;
   suggested_action: string;
+  error?: string;
 }
 
 export class MarketGeneratorService {
-  private openai?: OpenAI;
-
   constructor() {
-    const apiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-    if (apiKey) {
-      this.openai = new OpenAI({ 
-        apiKey,
-        baseURL: process.env.OPENROUTER_API_KEY ? 'https://openrouter.ai/api/v1' : undefined
-      });
-    } else {
-      console.warn('No AI API key set, using fallback market generation');
+    if (!isGeminiReady()) {
+      console.warn('No GEMINI_API_KEY set, using fallback market generation');
     }
   }
 
   async generateMarket(request: MarketRequest): Promise<GeneratedMarket> {
-    if (!this.openai) {
+    if (!isGeminiReady()) {
       return this.generateFallbackMarket(request);
     }
 
     const prompt = this.buildMarketPrompt(request);
     
     try {
-      const response = await this.openai.chat.completions.create({
-        model: process.env.OPENROUTER_API_KEY ? 'meta-llama/llama-3.1-8b-instruct' : 'gpt-4',
-        messages: [
+      const content = await chatCompletion([
           {
             role: 'system',
-            content: `You are a Polymarket-style prediction market generator. Your ONLY job is to convert tweet content into BINARY YES/NO prediction questions that are easy to understand.
+            content: `You are a strict prediction-market question generator. You convert tweets into sharp, verifiable YES/NO questions like Polymarket or Metaculus. You REFUSE to generate vague or unverifiable questions — output an error instead.
 
-⚠️  CRITICAL REQUIREMENT: Use simple, everyday language that a high school student or common person would understand. NO technical jargon, no crypto terminology, no complex analysis terms! ⚠️
+━━━ STEP 1 — EXTRACT FACTS (internal only, don't output) ━━━
+Answer internally:
+1. WHO — full legal name, company name, or ticker? (not "someone", "the person", "they")
+2. WHAT — specific price level, announcement, vote, score, or measurable event?
+3. WHEN — exact date + timezone the outcome is known?
+4. SOURCE — ONE specific public source anyone can check? (website URL pattern, API, official feed)
 
-DO NOT JUST COPY THE TWEET TEXT - YOU MUST TRANSFORM IT INTO A PREDICTION QUESTION!
+If ANY of these is missing or ambiguous → return { "error": "<reason>" }
 
-STEP-BY-STEP PROCESS:
-1. Read the tweet content
-2. Identify the core claim or topic (price movement, event, announcement, etc.)
-3. Convert it into a specific, measurable, future prediction
-4. Make it answerable with YES or NO
-5. Add specific numbers, prices, or verifiable criteria
-6. Set appropriate timeframe
-7. Use SIMPLE WORDS - explain like you're talking to your grandparent
+━━━ STEP 2 — QUESTION TEMPLATE ━━━
+Always follow this exact pattern:
+"Will [FULL NAME / TICKER] [VERB: reach / close above / announce / pass / win / release] [SPECIFIC THRESHOLD OR EVENT] by [DATE, TIME, TIMEZONE]?"
 
-GOOD EXAMPLES (Simple & Clear):
-❌ BAD: "@user: Solana ecosystem growing"
-✅ GOOD: "Will the Solana cryptocurrency price go above $200 by tomorrow?"
+Mandatory rules:
+• Subject MUST be a proper noun (person's full name, company name, asset name + ticker)
+• Must contain a NUMERIC THRESHOLD or a SPECIFIC NAMED EVENT (not "improve", "change", "react")
+• Must have an EXACT DEADLINE with timezone (never "soon", "shortly", "within hours")
+• Must be resolvable by checking exactly ONE named source
+• Start with "Will"
+• Simple English — no jargon (no: bullish, bearish, on-chain, momentum, sentiment, ratio, metrics, whale, hodl, protocol)
+• Never use bracket placeholders like [specific action] in the final question
 
-❌ BAD: "@user: ETH merge successful"  
-✅ GOOD: "Will Ethereum stay above $2,000 for the next 2 days?"
+━━━ WHAT TO REJECT — output { "error": "..." } for these ━━━
+• Tweet is a joke, meme, sarcasm, or shitpost with no factual claim
+• Tweet references unnamed people ("someone", "this guy", "the person")
+• Tweet is pure opinion with no measurable prediction ("things are bad", "feeling bullish")
+• No verifiable threshold exists ("will things get better?")
+• Subject is ambiguous slang or Twitter culture references
+• Tweet is about social-media engagement (ratios, likes, followers) — not verifiable via official sources
 
-❌ BAD: "@user: New crypto regulation coming"
-✅ GOOD: "Will the government announce new rules for cryptocurrency within 7 days?"
+━━━ RESOLUTION SOURCES (pick ONE per question) ━━━
+• Crypto price → "CoinGecko [ASSET] USD price" or "Coinbase [PAIR] spot price"
+• Stock price → "Yahoo Finance [TICKER] closing price" or "Google Finance [TICKER]"
+• Company news → "official press release on [company].com or Reuters/AP wire"
+• Government → "whitehouse.gov, congress.gov, or Reuters/AP"
+• Sports → "ESPN.com final score" or official league site
+• Election/vote → "official results from [election authority]"
+• Regulation → "Federal Register or official regulatory filing"
 
-❌ BAD: "@user: BTC volatility high"
-✅ GOOD: "Will Bitcoin price jump or drop by more than 5% in the next 12 hours?"
+━━━ EXAMPLES ━━━
+Tweet: "BTC pumping hard rn 🚀🚀"
+✅ "Will Bitcoin (BTC) close above $100,000 on CoinGecko by March 2, 2026, 11:59 PM UTC?"
 
-LANGUAGE GUIDE - DO THIS:
-✅ "Will the price go above $50?" (simple)
-✅ "Will Apple announce a new phone by Friday?" (clear, everyday)
-✅ "Will more than 1 million people do X?" (understandable)
+Tweet: "Tesla Q4 earnings gonna be insane"
+✅ "Will Tesla (TSLA) report Q4 2025 revenue above $30 billion per their official earnings release?"
 
-LANGUAGE GUIDE - AVOID THIS:
-❌ "Will the momentum indicator suggest a bullish trend?" (technical)
-❌ "Will on-chain metrics indicate accumulation?" (technical)
-❌ "Will there be a 20% oscillator deviation?" (jargon)
-❌ "Will the protocol governance vote succeed?" (crypto jargon)
+Tweet: "Hearing the Fed might cut rates this week"
+✅ "Will the US Federal Reserve announce an interest rate cut by March 7, 2026, per federalreserve.gov?"
 
-TRANSFORMATION PATTERNS (Using Simple Language):
-- Price mention → "Will [company/coin name] be worth more than \$[price] by [date]?"
-- Event mention → "Will [company/person] announce/release [thing] by [date]?"
-- Trend claim → "Will [easy-to-measure outcome] happen by [date]?"
-- News → "Will the news about [topic] prove true by [date]?"
+Tweet: "lmao someone ratioed that dude hard"
+→ { "error": "no identifiable subject or verifiable event" }
 
-MANDATORY RULES:
-✅ Start with "Will..."
-✅ Include specific numbers, dates, or prices
-✅ Be verifiable - use things people can actually check online
-✅ Use words a 12-year-old would understand
-✅ Set realistic expiry (1-48 hours based on urgency)
-✅ Make it YES/NO only
+Tweet: "President's Day sales are trash this year 😂"
+→ { "error": "subjective opinion with no measurable threshold or named entity" }
 
-❌ NEVER just copy the tweet text
-❌ NEVER use technical terms (momentum, volatility, accumulation, protocol, etc.)
-❌ NEVER make vague predictions like "Will sentiment improve?"
-❌ NEVER use crypto-specific jargon like "bullish", "altcoin", "whale", "hodl"
+Tweet: "vibes are off today ngl"
+→ { "error": "no factual claim, no measurable outcome" }
 
-CONCRETE EXAMPLES FOR DIFFERENT CATEGORIES:
-
-Technology/Companies:
-❌ WRONG: "Will technological innovation metrics exceed threshold?"
-✅ RIGHT: "Will Apple release a new iPhone model by end of March?"
-
-Cryptocurrency/Markets:
-❌ WRONG: "Will on-chain volume indicate buying pressure?"
-✅ RIGHT: "Will Bitcoin price go above \$50,000 by tomorrow?"
-
-Entertainment/Celebrity:
-❌ WRONG: "Will sentiment indicate celebrity endorsement trending?"
-✅ RIGHT: "Will [celebrity name] announce a new movie by next month?"
-
-Sports:
-❌ WRONG: "Will performance metrics suggest team victory probability?"
-✅ RIGHT: "Will [team name] win their next game this weekend?"
-
-Return ONLY valid JSON:
+━━━ OUTPUT — valid JSON only, nothing else ━━━
 {
-  "question": "Will [specific, simple prediction] by [date/time]?",
-  "data_source": "API or source to verify",
-  "expiry": "ISO timestamp",
-  "ai_probability": 0.5,
-  "confidence": "high/medium/low",
-  "reasoning": "Why this probability",
-  "suggested_action": "buy/sell/hold"
-}`
+  "question": "Will [named entity] [specific action/threshold] by [exact date + timezone]?",
+  "data_source": "Exact source name (e.g. 'CoinGecko Bitcoin USD price')",
+  "expiry": "ISO 8601",
+  "ai_probability": 0.0–1.0,
+  "confidence": "high | medium | low",
+  "reasoning": "2-3 sentences. Plain English.",
+  "suggested_action": "buy | sell | hold"
+}
+
+OR if unverifiable:
+{ "error": "one-line reason" }`
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.7,
-        max_tokens: 500
-      });
+        { temperature: 0.3, maxOutputTokens: 500 }
+      );
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from AI API');
+      const parsed = JSON.parse(content);
+
+      // If the AI explicitly refused, treat as error
+      if (parsed.error) {
+        console.warn(`[MarketGenerator] AI rejected tweet: ${parsed.error}`);
+        throw new Error(`AI rejected: ${parsed.error}`);
       }
 
-      const market = JSON.parse(content) as GeneratedMarket;
+      const market = parsed as GeneratedMarket;
+      // Normalise: AI may return resolution_source instead of data_source
+      if (!market.data_source && market.resolution_source) {
+        market.data_source = market.resolution_source;
+      }
+
       try {
         return this.validateMarket(market);
       } catch (validationError) {
         console.error('Market validation error:', validationError instanceof Error ? validationError.message : validationError);
-        console.log('Attempting to use validated/corrected market anyway...');
+        // Re-throw vagueness rejections so they fall to fallback
+        if (validationError instanceof Error && validationError.message.includes('vague')) {
+          throw validationError;
+        }
         // Return the market even if validation makes corrections - don't fail
         return market;
       }
     } catch (error) {
       console.error('Error generating market:', error);
       // If it's an auth error, log helpful message
-      if (error instanceof Error && error.message.includes('401')) {
-        console.error('⚠️  OpenRouter API authentication failed. Please check your OPENROUTER_API_KEY in .env');
-      } else if (error instanceof Error && error.message.includes('404')) {
-        console.error('⚠️  AI model not found. Please check the model name is correct and available.');
+      if (error instanceof Error && error.message.includes('API key')) {
+        console.error('⚠️  Gemini API authentication failed. Please check your GEMINI_API_KEY in .env');
       }
       return this.generateFallbackMarket(request);
     }
@@ -174,50 +161,23 @@ Return ONLY valid JSON:
     const in24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const in48Hours = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
-    return `
-🎯 TWEET TO TRANSFORM INTO A SIMPLE PREDICTION QUESTION:
+    return `TWEET:
 "${request.trend}"
 
 Category: ${request.category}
-Current Time: ${now.toISOString()}
+Current UTC time: ${now.toISOString()}
 
-⚠️  YOUR TASK: Turn this tweet into a SIMPLE PREDICTION QUESTION (not a statement!)
-Remember: Use words a 12-year-old would understand. NO JARGON!
+TIMEFRAME OPTIONS (pick the most appropriate):
+• Breaking news → expiry in 6-12h  (between ${in6Hours.toISOString()} and ${in12Hours.toISOString()})
+• Scheduled event → expiry in 12-24h (between ${in12Hours.toISOString()} and ${in24Hours.toISOString()})
+• Trend / price target → expiry in 24-48h (between ${in24Hours.toISOString()} and ${in48Hours.toISOString()})
 
-IMPORTANT REMINDERS:
-- This is for REGULAR PEOPLE, not crypto experts
-- No crypto terminology (hodl, bullish, bullish, whale, altcoin, protocol, etc.)
-- No technical babble (momentum, volatility, oscillator, on-chain metrics, etc.)
-- Make it SUPER CLEAR what will happen and when
-
-TRANSFORMATION STEPS:
-1. What is the core claim? (e.g., "Solana growing" → predict price movement)
-2. What's SIMPLE AND MEASURABLE? (price, event yes/no, count of something)
-3. What's the timeframe? (1-6 hours for breaking news, 6-24 for events, 24-48 for trends)
-4. Turn into "Will [something simple] happen by [exact time]?" using EVERYDAY WORDS
-
-DURATION GUIDE:
-- Breaking news/immediate events → 1-6 hours (${in1Hour.toISOString()} to ${in6Hours.toISOString()})
-- Events/announcements → 6-24 hours (${in6Hours.toISOString()} to ${in24Hours.toISOString()})  
-- Long-term trends → 24-48 hours (${in24Hours.toISOString()} to ${in48Hours.toISOString()})
-
-⚠️  CRITICAL: Your "question" MUST be a prediction, NOT just the tweet text!
-
-Example Transformations:
-Tweet: "@user: Ethereum merge successful"
-❌ WRONG: "Ethereum merge successful" 
-❌ WRONG: "Will Ethereum on-chain metrics indicate successful execution?"
-✅ RIGHT: "Will Ethereum stay above \$2,000 for 48 hours after the merge?"
-
-Tweet: "@user: Apple might release new iPhone soon"
-❌ WRONG: "Apple releasing new iPhone"
-✅ RIGHT: "Will Apple announce a new iPhone model by end of this month?"
-
-Tweet: "@user: Bitcoin bulls taking over"
-❌ WRONG: "Will bullish sentiment continue?"
-✅ RIGHT: "Will Bitcoin price reach \$50,000 by tomorrow?"
-
-NOW GENERATE THE MARKET JSON WITH A SIMPLE, CLEAR QUESTION:`;
+INSTRUCTIONS:
+1. Identify the SPECIFIC entity and measurable outcome in the tweet.
+2. If the tweet is a joke, meme, vague opinion, or references unnamed people → return { "error": "..." }
+3. Otherwise, write ONE clear boolean question with a numeric threshold or named event + exact deadline.
+4. Name the single source where anyone can verify the answer.
+5. Return valid JSON only.`;
   }
 
   private validateMarket(market: GeneratedMarket): GeneratedMarket {
@@ -259,13 +219,50 @@ NOW GENERATE THE MARKET JSON WITH A SIMPLE, CLEAR QUESTION:`;
 
     // Ensure question is binary and starts with interrogative
     if (!this.isBinaryQuestion(market.question)) {
-      // Force it to be a question if it's not
       if (!market.question.startsWith('Will')) {
         market.question = `Will ${market.question}`;
       }
       if (!market.question.endsWith('?')) {
         market.question = `${market.question}?`;
       }
+    }
+
+    // ── Vagueness filter: reject questions with unverifiable language ──
+    const q = market.question.toLowerCase();
+    const VAGUE_PATTERNS = [
+      /\bthe person\b/,
+      /\bsomeone\b/,
+      /\bthis guy\b/,
+      /\ba (?:us |government |company )?official\b/,
+      /\bconsumers\b.*\bavoiding\b/,
+      /\bsentiment\b/,
+      /\bmomentum\b/,
+      /\bon-chain\b/,
+      /\bbullish\b/,
+      /\bbearish\b/,
+      /\bvibes?\b/,
+      /\bratio(?:ed|'d)?\b/,
+      /\bwhale\b/,
+      /\bhodl\b/,
+      /\[specific/i,          // bracket placeholders leaked through
+      /\[.*action.*\]/i,
+      /announce a new project/,  // generic non-specific
+      /\bstart avoiding\b/,
+      /\bpain of\b/,
+    ];
+    for (const pat of VAGUE_PATTERNS) {
+      if (pat.test(q)) {
+        console.warn(`[MarketGenerator] Rejected vague question (matched ${pat}): ${market.question}`);
+        throw new Error(`Question is vague (matched: ${pat.source})`);
+      }
+    }
+
+    // Must contain at least one proper noun indicator (capital letter mid-sentence) or number
+    const hasProperNoun = /Will [A-Z][a-z]/.test(market.question);
+    const hasNumber = /\d/.test(market.question);
+    if (!hasProperNoun && !hasNumber) {
+      console.warn(`[MarketGenerator] Rejected: no proper noun or number in question: ${market.question}`);
+      throw new Error('Question is vague — no named entity or numeric threshold found');
     }
 
     return market;

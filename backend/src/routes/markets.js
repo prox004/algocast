@@ -21,12 +21,17 @@ const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const db = require('../db');
 const { createMarketASAs } = require('../algorand/asa');
+const { sendAlgo } = require('../algorand/asa');
 const {
   signBuyGroup,
   signClaim,
   broadcast,
   isContractReady,
+  fundUserAccount,
+  getEscrowAddress,
 } = require('../algorand/transactionBuilder');
+const { getAlgodClient } = require('../algorand/client');
+const { normalizeAddress } = require('../wallet/custodialWallet');
 
 const router = express.Router();
 
@@ -288,32 +293,46 @@ router.post('/claim', requireAuth, async (req, res) => {
     const user   = db.getUserById(req.user.id);
     let txid     = null;
 
-    // ── On-chain claim ───────────────────────────────────────────────────────
+    // ── On-chain claim (smart contract) ─────────────────────────────────────
     if (market.app_id && isContractReady()) {
       const winningAsaId = market.outcome === 1 ? market.yes_asa_id : market.no_asa_id;
       try {
         const signed = await signClaim({
-          fromAddress:  user.custodial_address,
+          fromAddress:  normalizeAddress(user.custodial_address),
           encryptedKey: user.encrypted_private_key,
           appId:        market.app_id,
           winningAsaId,
         });
         txid = await broadcast(signed);
-        // On-chain payout delivered by contract; DB balance NOT credited (user got real ALGO)
       } catch (txnErr) {
-        console.error('[claim txn]', txnErr.message);
+        console.error('[claim contract-txn]', txnErr.message);
         return res.status(502).json({ error: 'On-chain claim failed' });
       }
     } else {
-      // Mock mode: credit balance in DB
-      db.updateUser(user.id, { balance: user.balance + payout });
+      // ── Escrow mode: send ALGO from platform escrow → user on-chain ──────
+      try {
+        txid = await fundUserAccount({
+          toAddress: normalizeAddress(user.custodial_address),
+          amountMicroAlgos: payout,
+        });
+        console.log(`[claim] On-chain payout ${payout / 1e6} ALGO to ${normalizeAddress(user.custodial_address)}. Tx: ${txid}`);
+      } catch (txnErr) {
+        console.error('[claim escrow-txn]', txnErr.message);
+        return res.status(502).json({ error: 'On-chain payout failed' });
+      }
     }
+
+    // Sync user balance from chain
+    const newBalance = await getOnChainBalance(normalizeAddress(user.custodial_address));
+    db.updateUser(user.id, { balance: newBalance });
 
     db.createClaim({
       id: uuidv4(),
       user_id: req.user.id,
       market_id,
-      claimed_at: Math.floor(Date.now() / 1000),
+      payout,
+      timestamp: Math.floor(Date.now() / 1000),
+      txid,
     });
 
     return res.json({ success: true, payout, txid });
@@ -353,9 +372,10 @@ router.get('/:id/orderbook', (req, res) => {
 /**
  * POST /markets/place-order (protected)
  * Place a limit order on the order book.
+ * On-chain escrow: ALGO transferred to platform escrow address.
  * Body: { market_id, side: "YES"|"NO", price: 0.01-0.99, amount: microAlgos }
  */
-router.post('/place-order', requireAuth, (req, res) => {
+router.post('/place-order', requireAuth, async (req, res) => {
   try {
     const { market_id, side, price, amount } = req.body;
     const microAlgos = parseInt(amount, 10);
@@ -383,12 +403,33 @@ router.post('/place-order', requireAuth, (req, res) => {
 
     const user = db.getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.balance < microAlgos) {
-      return res.status(400).json({ error: 'Insufficient balance' });
+
+    // Check on-chain balance
+    const fromAddress = normalizeAddress(user.custodial_address);
+    const onChainBalance = await getOnChainBalance(fromAddress);
+    if (onChainBalance < microAlgos + MIN_BALANCE) {
+      return res.status(400).json({ error: 'Insufficient on-chain balance' });
     }
 
-    // Escrow: deduct balance when placing order
-    db.updateUser(user.id, { balance: user.balance - microAlgos });
+    // On-chain escrow: send ALGO to platform escrow
+    let txid = null;
+    try {
+      const escrowAddress = getEscrowAddress();
+      txid = await sendAlgo(
+        user.encrypted_private_key,
+        fromAddress,
+        escrowAddress,
+        microAlgos,
+      );
+      console.log(`[place-order] On-chain escrow tx: ${txid}`);
+    } catch (txnErr) {
+      console.error('[place-order escrow-txn]', txnErr.message);
+      return res.status(502).json({ error: 'On-chain escrow transaction failed' });
+    }
+
+    // Sync balance
+    const newBalance = await getOnChainBalance(fromAddress);
+    db.updateUser(user.id, { balance: newBalance });
 
     const order = db.createOrder({
       id: uuidv4(),
@@ -399,12 +440,13 @@ router.post('/place-order', requireAuth, (req, res) => {
       amount: microAlgos,
       filled: 0,
       status: 'open',
+      txid,
     });
 
     // Try to match the order immediately
     const fills = matchOrders(market);
 
-    return res.json({ success: true, order, fills });
+    return res.json({ success: true, order, fills, txid });
   } catch (err) {
     console.error('[place-order]', err.message);
     return res.status(500).json({ error: 'Order placement failed' });
@@ -413,9 +455,9 @@ router.post('/place-order', requireAuth, (req, res) => {
 
 /**
  * DELETE /markets/cancel-order/:orderId (protected)
- * Cancel an open order and refund the remaining amount.
+ * Cancel an open order and refund the remaining amount on-chain.
  */
-router.delete('/cancel-order/:orderId', requireAuth, (req, res) => {
+router.delete('/cancel-order/:orderId', requireAuth, async (req, res) => {
   try {
     const order = db.getOrderById(req.params.orderId);
     if (!order) return res.status(404).json({ error: 'Order not found' });
@@ -426,15 +468,30 @@ router.delete('/cancel-order/:orderId', requireAuth, (req, res) => {
       return res.status(400).json({ error: 'Order is not open' });
     }
 
-    // Refund remaining (amount - filled)
+    // Refund remaining (amount - filled) on-chain
     const remaining = order.amount - order.filled;
     const user = db.getUserById(req.user.id);
+    let txid = null;
+
     if (remaining > 0) {
-      db.updateUser(user.id, { balance: user.balance + remaining });
+      try {
+        txid = await fundUserAccount({
+          toAddress: normalizeAddress(user.custodial_address),
+          amountMicroAlgos: remaining,
+        });
+        console.log(`[cancel-order] On-chain refund ${remaining / 1e6} ALGO. Tx: ${txid}`);
+      } catch (txnErr) {
+        console.error('[cancel-order refund-txn]', txnErr.message);
+        return res.status(502).json({ error: 'On-chain refund failed' });
+      }
+
+      // Sync balance
+      const newBalance = await getOnChainBalance(normalizeAddress(user.custodial_address));
+      db.updateUser(user.id, { balance: newBalance });
     }
 
     db.cancelOrder(order.id, req.user.id);
-    return res.json({ success: true, refunded: remaining });
+    return res.json({ success: true, refunded: remaining, txid });
   } catch (err) {
     console.error('[cancel-order]', err.message);
     return res.status(500).json({ error: 'Cancel failed' });

@@ -97,6 +97,30 @@ sqlite.exec(`
 
 // ── Database Migrations ─────────────────────────────────────────────────────
 
+// Add txid to trades table for on-chain tracking
+try {
+  sqlite.prepare('SELECT txid FROM trades LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating trades table: adding txid column');
+  try { sqlite.exec('ALTER TABLE trades ADD COLUMN txid TEXT;'); } catch (e) {}
+}
+
+// Add txid to orders table for on-chain escrow tracking
+try {
+  sqlite.prepare('SELECT txid FROM orders LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating orders table: adding txid column');
+  try { sqlite.exec('ALTER TABLE orders ADD COLUMN txid TEXT;'); } catch (e) {}
+}
+
+// Add txid to claims table for on-chain payout tracking
+try {
+  sqlite.prepare('SELECT txid FROM claims LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating claims table: adding txid column');
+  try { sqlite.exec('ALTER TABLE claims ADD COLUMN txid TEXT;'); } catch (e) {}
+}
+
 // Add tweet-related columns if they don't exist
 try {
   sqlite.prepare('SELECT tweet_id FROM markets LIMIT 1').get();
@@ -283,6 +307,16 @@ sqlite.exec(`
 
 console.log('[SQLite] Admin, Resolution & Order Book tables initialized');
 
+// ── External Wallet Columns ─────────────────────────────────────────────────
+
+try {
+  sqlite.prepare('SELECT external_wallet FROM users LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating users table: adding external_wallet columns');
+  try { sqlite.exec('ALTER TABLE users ADD COLUMN external_wallet TEXT;'); } catch (e) {}
+  try { sqlite.exec('ALTER TABLE users ADD COLUMN external_wallet_verified_at INTEGER;'); } catch (e) {}
+}
+
 // ── Prepared Statements ─────────────────────────────────────────────────────
 
 const statements = {
@@ -300,6 +334,7 @@ const statements = {
     UPDATE users SET oauth_provider = ?, oauth_id = ? WHERE id = ?
   `),
   getUserByOAuth: sqlite.prepare('SELECT * FROM users WHERE oauth_provider = ? AND oauth_id = ?'),
+  updateExternalWallet: sqlite.prepare('UPDATE users SET external_wallet = ?, external_wallet_verified_at = ? WHERE id = ?'),
 
   // Markets
   insertMarket: sqlite.prepare(`
@@ -321,8 +356,8 @@ const statements = {
 
   // Trades
   insertTrade: sqlite.prepare(`
-    INSERT INTO trades (id, user_id, market_id, side, amount, tokens, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO trades (id, user_id, market_id, side, amount, tokens, timestamp, txid)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getTradesByUser: sqlite.prepare('SELECT * FROM trades WHERE user_id = ? ORDER BY timestamp DESC'),
   getTradesByMarket: sqlite.prepare('SELECT * FROM trades WHERE market_id = ? ORDER BY timestamp DESC'),
@@ -330,8 +365,8 @@ const statements = {
 
   // Claims
   insertClaim: sqlite.prepare(`
-    INSERT INTO claims (id, user_id, market_id, payout, timestamp)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO claims (id, user_id, market_id, payout, timestamp, txid)
+    VALUES (?, ?, ?, ?, ?, ?)
   `),
   findClaim: sqlite.prepare('SELECT * FROM claims WHERE user_id = ? AND market_id = ?'),
 
@@ -371,8 +406,8 @@ const statements = {
 
   // Orders (order book)
   insertOrder: sqlite.prepare(`
-    INSERT INTO orders (id, market_id, user_id, side, price, amount, filled, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO orders (id, market_id, user_id, side, price, amount, filled, status, created_at, txid)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getOrderById: sqlite.prepare('SELECT * FROM orders WHERE id = ?'),
   getOpenOrdersByMarket: sqlite.prepare("SELECT * FROM orders WHERE market_id = ? AND status = 'open' ORDER BY price DESC, created_at ASC"),
@@ -442,6 +477,16 @@ const db = {
 
   getUserByOAuth(provider, oauthId) {
     return statements.getUserByOAuth.get(provider, oauthId) || null;
+  },
+
+  setExternalWallet(userId, address, verifiedAt) {
+    statements.updateExternalWallet.run(address, verifiedAt, userId);
+    return this.getUserById(userId);
+  },
+
+  clearExternalWallet(userId) {
+    statements.updateExternalWallet.run(null, null, userId);
+    return this.getUserById(userId);
   },
 
   // ── Markets ────────────────────────────────────────────────────────────────
@@ -521,7 +566,8 @@ const db = {
         trade.side,
         trade.amount,
         trade.tokens,
-        trade.timestamp
+        trade.timestamp,
+        trade.txid || null
       );
       return trade;
     } catch (err) {
@@ -551,7 +597,8 @@ const db = {
         claim.user_id,
         claim.market_id,
         claim.payout,
-        claim.timestamp
+        claim.timestamp,
+        claim.txid || null
       );
       return claim;
     } catch (err) {
@@ -713,7 +760,8 @@ const db = {
         order.amount,
         order.filled || 0,
         order.status || 'open',
-        Date.now()
+        Date.now(),
+        order.txid || null
       );
       return order;
     } catch (err) {

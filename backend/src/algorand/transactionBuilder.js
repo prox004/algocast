@@ -377,6 +377,38 @@ async function fundUserAccount(params) {
   return txid;
 }
 
+// ── Escrow address (platform pool) ─────────────────────────────────────────────
+
+let _cachedEscrowAddress = null;
+
+/**
+ * Returns the deployer/escrow address used as the platform's pool.
+ * All bets flow through this address; payouts come from it.
+ * @returns {string} Algorand address
+ */
+function getEscrowAddress() {
+  if (_cachedEscrowAddress) return _cachedEscrowAddress;
+
+  const network = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();
+
+  if (network === 'local' || network === 'localnet') {
+    // On localnet, use the env var or fallback (KMD address set at deploy time)
+    const addr = process.env.ESCROW_ADDRESS || '';
+    if (!addr) {
+      console.warn('[getEscrowAddress] ESCROW_ADDRESS not set for localnet — deposits will fail');
+    }
+    _cachedEscrowAddress = addr;
+    return addr;
+  }
+
+  // TestNet: derive from deployer mnemonic
+  const mnemonic = process.env.DEPLOYER_MNEMONIC;
+  if (!mnemonic) throw new Error('DEPLOYER_MNEMONIC not set in .env');
+  const account = algosdk.mnemonicToSecretKey(mnemonic);
+  _cachedEscrowAddress = normalizeAddress(account.addr);
+  return _cachedEscrowAddress;
+}
+
 module.exports = {
   broadcast,
   signBuyGroup,
@@ -386,4 +418,5 @@ module.exports = {
   readMarketState,
   isContractReady,
   fundUserAccount,
+  getEscrowAddress,
 };

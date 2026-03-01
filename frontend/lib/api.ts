@@ -119,6 +119,7 @@ export interface Trade {
   amount: number;
   tokens: number;
   timestamp: number;
+  txid?: string | null;
   market_question?: string;
   category?: string;
   market_expiry?: number;
@@ -126,6 +127,19 @@ export interface Trade {
   market_outcome?: 0 | 1 | null;
   profit_loss?: number | null;
   is_winner?: boolean | null;
+}
+
+export interface WalletTransaction {
+  id: string;
+  type: string;
+  label: 'deposit' | 'bet_escrow' | 'claim_payout' | 'withdrawal' | 'contract_call' | 'unknown';
+  sender: string;
+  receiver: string;
+  amount: number;
+  fee: number;
+  timestamp: number;
+  confirmed_round: number | null;
+  explorer_url: string;
 }
 
 export interface AIAnalysis {
@@ -224,6 +238,10 @@ export async function syncWalletBalance(): Promise<{ success: boolean; balance: 
   });
 }
 
+export async function getWalletTransactions(limit = 30): Promise<{ transactions: WalletTransaction[]; address: string }> {
+  return request(`/wallet/transactions?limit=${limit}`);
+}
+
 export async function deposit(amount: number): Promise<{ success: boolean; txid: string; balance: number }> {
   return request('/wallet/deposit', {
     method: 'POST',
@@ -231,10 +249,10 @@ export async function deposit(amount: number): Promise<{ success: boolean; txid:
   });
 }
 
-export async function withdraw(to_address: string, amount: number): Promise<{ success: boolean; txid: string; balance: number }> {
+export async function withdraw(amount: number): Promise<{ success: boolean; txid: string; balance: number }> {
   return request('/wallet/withdraw', {
     method: 'POST',
-    body: JSON.stringify({ to_address, amount }),
+    body: JSON.stringify({ amount }),
   });
 }
 
@@ -243,6 +261,50 @@ export async function exportWalletMnemonic(password: string): Promise<{ success:
     method: 'POST',
     body: JSON.stringify({ password }),
   });
+}
+
+// ── External Wallet / Profile ────────────────────────────────────────────────
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  custodial_address: string;
+  balance: number;
+  external_wallet: string | null;
+  external_wallet_verified_at: number | null;
+  oauth_provider: string | null;
+  created_at: number;
+}
+
+export async function getProfile(): Promise<UserProfile> {
+  return request('/wallet/profile');
+}
+
+export async function getWalletChallenge(address: string): Promise<{
+  nonce: string;
+  txnBase64: string;
+  note: string;
+  expiresAt: number;
+}> {
+  return request('/wallet/challenge', {
+    method: 'POST',
+    body: JSON.stringify({ address }),
+  });
+}
+
+export async function verifyWalletOwnership(
+  nonce: string,
+  signedTxnBase64: string,
+  address: string,
+): Promise<{ success: boolean; external_wallet: string; verified_at: number }> {
+  return request('/wallet/verify-ownership', {
+    method: 'POST',
+    body: JSON.stringify({ nonce, signedTxnBase64, address }),
+  });
+}
+
+export async function disconnectExternalWallet(): Promise<{ success: boolean }> {
+  return request('/wallet/disconnect-external', { method: 'POST' });
 }
 
 // ── Markets ──────────────────────────────────────────────────────────────────

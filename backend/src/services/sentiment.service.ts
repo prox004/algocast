@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import { chatCompletion, isGeminiReady } from './gemini';
 import axios from 'axios';
 
 interface NewsArticle {
@@ -47,19 +47,11 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 const NEWS_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 export class SentimentService {
-  private openai?: OpenAI;
   private newsApiKey?: string;
   private cache = new Map<string, CacheEntry>();
   private newsCheckTimestamps = new Map<string, number>();
 
   constructor() {
-    const apiKey = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-    if (apiKey) {
-      this.openai = new OpenAI({
-        apiKey,
-        baseURL: process.env.OPENROUTER_API_KEY ? 'https://openrouter.ai/api/v1' : undefined
-      });
-    }
     this.newsApiKey = process.env.NEWS_API_KEY;
   }
 
@@ -197,13 +189,6 @@ export class SentimentService {
     }
   }
 
-  private getModel(): string {
-    if (process.env.OPENROUTER_API_KEY) {
-      return 'meta-llama/llama-3.1-8b-instruct';
-    }
-    return 'gpt-4o-mini';
-  }
-
   private parseJSON(text: string): any {
     const cleaned = text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
     return JSON.parse(cleaned);
@@ -217,7 +202,7 @@ export class SentimentService {
     entities: string[];
     context: string;
   }> {
-    if (!this.openai) {
+    if (!isGeminiReady()) {
       return this.understandQuestionFallback(question);
     }
 
@@ -241,15 +226,10 @@ IMPORTANT RULES:
 
 Respond with ONLY valid JSON, no markdown.`;
 
-      const response = await this.openai.chat.completions.create({
-        model: this.getModel(),
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        max_tokens: 400
-      });
-
-      const content = response.choices[0]?.message?.content?.trim();
-      if (!content) throw new Error('Empty AI response');
+      const content = await chatCompletion(
+        [{ role: 'user', content: prompt }],
+        { temperature: 0.1, maxOutputTokens: 400 }
+      );
 
       const parsed = this.parseJSON(content);
       console.log(`[SentimentService] AI topic understanding: ${parsed.topic}`);
@@ -309,7 +289,7 @@ Respond with ONLY valid JSON, no markdown.`;
     question: string,
     newsArticles: NewsArticle[] = []
   ): Promise<{ score: number; confidence: number; trendVolume: number; reasoning: string }> {
-    if (!this.openai) {
+    if (!isGeminiReady()) {
       return { score: 0, confidence: 0.5, trendVolume: 50000, reasoning: '' };
     }
 
@@ -342,15 +322,10 @@ IMPORTANT:
 
 Respond with ONLY valid JSON, no markdown.`;
 
-      const response = await this.openai.chat.completions.create({
-        model: this.getModel(),
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: 350
-      });
-
-      const content = response.choices[0]?.message?.content?.trim();
-      if (!content) throw new Error('Empty AI response');
+      const content = await chatCompletion(
+        [{ role: 'user', content: prompt }],
+        { temperature: 0.2, maxOutputTokens: 350 }
+      );
 
       const parsed = this.parseJSON(content);
       console.log(`[SentimentService] AI news-informed analysis: score=${parsed.score}, confidence=${parsed.confidence}`);
@@ -443,7 +418,7 @@ Respond with ONLY valid JSON, no markdown.`;
       source: a.source?.name || 'Unknown',
     }));
 
-    if (!this.openai || articleList.length === 0) {
+    if (!isGeminiReady() || articleList.length === 0) {
       return this.fallbackRelevanceFilter(articles, entities);
     }
 
@@ -467,15 +442,10 @@ Return a JSON array of objects with: { "idx": number, "relevance": number, "sent
 ONLY include articles with relevance >= 5. Omit irrelevant ones.
 Respond with ONLY a valid JSON array, no markdown.`;
 
-      const response = await this.openai.chat.completions.create({
-        model: this.getModel(),
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        max_tokens: 600
-      });
-
-      const content = response.choices[0]?.message?.content?.trim();
-      if (!content) throw new Error('Empty AI response');
+      const content = await chatCompletion(
+        [{ role: 'user', content: prompt }],
+        { temperature: 0.1, maxOutputTokens: 600 }
+      );
 
       const ratings: { idx: number; relevance: number; sentiment: string }[] = this.parseJSON(content);
 

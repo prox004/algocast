@@ -115,7 +115,34 @@ export default function BuyPanel({ market, defaultSide = 'YES', onTrade, onClose
           onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
         />
         {micro > 0 && (
-          <p className="text-xs text-gray-600 mb-4 px-1">{formatAlgo(micro)}</p>
+          <p className="text-xs text-gray-600 mb-2 px-1">{formatAlgo(micro)}</p>
+        )}
+
+        {/* Potential winnings display */}
+        {amount > 0 && (
+          <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-3 mb-4">
+            <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Potential Winnings</p>
+            <div className="flex justify-between items-center">
+              <div className="text-center flex-1">
+                <p className="text-[10px] text-gray-500 mb-0.5">If {side} wins</p>
+                <p className="text-emerald-400 font-bold text-sm">
+                  {(amount / (side === 'YES' ? yesProb : (1 - yesProb))).toFixed(4)} ALGO
+                </p>
+                <p className="text-emerald-500/70 text-[10px]">
+                  +{(amount / (side === 'YES' ? yesProb : (1 - yesProb)) - amount).toFixed(4)} profit
+                </p>
+              </div>
+              <div className="w-px h-8 bg-gray-700" />
+              <div className="text-center flex-1">
+                <p className="text-[10px] text-gray-500 mb-0.5">If {side === 'YES' ? 'NO' : 'YES'} wins</p>
+                <p className="text-red-400 font-bold text-sm">0 ALGO</p>
+                <p className="text-red-500/70 text-[10px]">-{amount.toFixed(4)} loss</p>
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-600 text-center mt-2">
+              Multiplier: {(1 / (side === 'YES' ? yesProb : (1 - yesProb))).toFixed(2)}x
+            </p>
+          </div>
         )}
 
         {msg && (

@@ -201,6 +201,36 @@ export default function MarketDetailPage() {
       {/* AI Insight */}
       <AIInsightPanel marketId={market.id} />
 
+      {/* Potential Payout Calculator */}
+      {!market.resolved && !expired && (
+        <div className="card">
+          <h2 className="font-semibold mb-3 text-sm">Potential Payouts (per 1 ALGO)</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-emerald-950/40 border border-emerald-800/30 rounded-xl p-3 text-center">
+              <p className="text-xs text-emerald-400/70 mb-1">If YES wins</p>
+              <p className="text-xl font-bold text-emerald-400">
+                {(1 / (marketProb || 0.01)).toFixed(2)} ALGO
+              </p>
+              <p className="text-[10px] text-emerald-500/60 mt-0.5">
+                {(1 / (marketProb || 0.01)).toFixed(2)}x multiplier
+              </p>
+            </div>
+            <div className="bg-red-950/40 border border-red-800/30 rounded-xl p-3 text-center">
+              <p className="text-xs text-red-400/70 mb-1">If NO wins</p>
+              <p className="text-xl font-bold text-red-400">
+                {(1 / ((1 - marketProb) || 0.01)).toFixed(2)} ALGO
+              </p>
+              <p className="text-[10px] text-red-500/60 mt-0.5">
+                {(1 / ((1 - marketProb) || 0.01)).toFixed(2)}x multiplier
+              </p>
+            </div>
+          </div>
+          <p className="text-[10px] text-gray-600 text-center mt-2">
+            All payouts are on-chain. Lower probability = higher potential return.
+          </p>
+        </div>
+      )}
+
       {/* News Sentiment Analysis */}
       <SentimentPanel marketId={market.id} />
 

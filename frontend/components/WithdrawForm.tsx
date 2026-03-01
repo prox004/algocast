@@ -7,8 +7,11 @@ interface WithdrawFormProps {
   onSuccess?: () => void;
 }
 
+/**
+ * @deprecated Use the inline withdraw form on /profile instead.
+ * Withdraw now requires a verified external wallet — no manual address input.
+ */
 export default function WithdrawForm({ onSuccess }: WithdrawFormProps) {
-  const [toAddress, setToAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,14 +23,12 @@ export default function WithdrawForm({ onSuccess }: WithdrawFormProps) {
     setIsError(false);
 
     const micro = Math.floor(parseFloat(amount) * 1_000_000);
-    if (!toAddress.trim()) return setMsg('Destination address is required');
     if (!micro || micro <= 0) return setMsg('Enter a valid ALGO amount');
 
     setLoading(true);
     try {
-      const res = await withdraw(toAddress.trim(), micro);
+      const res = await withdraw(micro);
       setMsg(`Withdrawn! Tx: ${res.txid} — New balance: ${formatAlgo(res.balance)}`);
-      setToAddress('');
       setAmount('');
       onSuccess?.();
     } catch (err: any) {
@@ -42,16 +43,6 @@ export default function WithdrawForm({ onSuccess }: WithdrawFormProps) {
     <div className="card">
       <h2 className="font-semibold mb-4">Withdraw ALGO</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="label">Destination Address</label>
-          <input
-            type="text"
-            className="input font-mono text-sm"
-            placeholder="ALGORAND ADDRESS..."
-            value={toAddress}
-            onChange={(e) => setToAddress(e.target.value)}
-          />
-        </div>
         <div>
           <label className="label">Amount (ALGO)</label>
           <input
@@ -76,7 +67,7 @@ export default function WithdrawForm({ onSuccess }: WithdrawFormProps) {
         </button>
       </form>
       <p className="text-xs text-gray-600 mt-3">
-        Withdrawals are real on-chain Algorand transactions on TestNet.
+        Withdrawals go to your verified external wallet.
       </p>
     </div>
   );

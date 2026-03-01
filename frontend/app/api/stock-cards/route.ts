@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 const STOCKS = ['NVDA', 'AAPL', 'MSFT', 'TSLA', 'AMZN', 'META', 'GOOGL'];
 
+
 async function fetchStock(symbol: string) {
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1h&range=5d`;
   const res = await fetch(url, {

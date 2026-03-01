@@ -39,6 +39,8 @@ function publicUser(user) {
     email: String(user.email || ''),
     custodial_address: normalizeAddress(user.custodial_address),
     balance: Number(user.balance) || 0,
+    external_wallet: user.external_wallet || null,
+    external_wallet_verified_at: user.external_wallet_verified_at || null,
   };
 }
 
