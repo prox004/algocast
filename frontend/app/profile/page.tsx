@@ -20,12 +20,13 @@ import TradesHistory from '@/components/TradesHistory';
 import algosdk from 'algosdk';
 
 const LABEL_CONFIG: Record<string, { text: string; color: string; icon: string }> = {
-  deposit: { text: 'Deposit', color: 'text-emerald-400', icon: '↓' },
-  bet_escrow: { text: 'Bet Placed', color: 'text-amber-400', icon: '↑' },
-  claim_payout: { text: 'Claim Payout', color: 'text-emerald-400', icon: '↓' },
-  withdrawal: { text: 'Withdrawal', color: 'text-red-400', icon: '↑' },
-  contract_call: { text: 'Contract Call', color: 'text-purple-400', icon: '⚡' },
-  unknown: { text: 'Transaction', color: 'text-gray-400', icon: '•' },
+  deposit:       { text: 'Deposit',       color: 'text-emerald-400', icon: '↓' },
+  bet_escrow:    { text: 'Bet Placed',    color: 'text-amber-400',   icon: '📊' },
+  claim_payout:  { text: 'Claim Payout',  color: 'text-emerald-400', icon: '🏆' },
+  withdrawal:    { text: 'Withdrawal',    color: 'text-red-400',     icon: '↑' },
+  order_escrow:  { text: 'Limit Order',   color: 'text-blue-400',    icon: '📋' },
+  contract_call: { text: 'Contract Call', color: 'text-purple-400',  icon: '⚡' },
+  unknown:       { text: 'Transaction',   color: 'text-gray-400',    icon: '•' },
 };
 
 export default function ProfilePage() {
@@ -381,11 +382,11 @@ export default function ProfilePage() {
         </button>
       </div>
 
-      {/* ── On-Chain Transactions ──────────────────────────────────── */}
+      {/* ── Transaction History ──────────────────────────────────── */}
       {tab === 'transactions' && (
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold">On-Chain Transactions</h2>
+            <h2 className="text-lg font-bold">Transaction History</h2>
             <button
               onClick={() => setRefreshKey((k) => k + 1)}
               className="text-xs text-purple-400 hover:text-purple-300"
@@ -399,36 +400,70 @@ export default function ProfilePage() {
               <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : transactions.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-6">No transactions yet.</p>
+            <p className="text-gray-500 text-sm text-center py-6">No transactions yet. Place a trade to get started!</p>
           ) : (
-            <div className="space-y-2 max-h-[400px] overflow-y-auto scrollbar-thin">
+            <div className="space-y-2 max-h-[500px] overflow-y-auto scrollbar-thin">
               {transactions.map((tx) => {
                 const cfg = LABEL_CONFIG[tx.label] || LABEL_CONFIG.unknown;
                 const isIncoming = tx.label === 'deposit' || tx.label === 'claim_payout';
-                return (
+
+                const inner = (
+                  <>
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0 ${
+                      isIncoming ? 'bg-emerald-900/30' : tx.label === 'bet_escrow' || tx.label === 'order_escrow' ? 'bg-amber-900/20' : 'bg-red-900/30'
+                    }`}>
+                      <span>{cfg.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className={`text-sm font-semibold ${cfg.color}`}>{cfg.text}</p>
+                        {tx.side && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                            tx.side === 'YES' ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/40 text-red-400'
+                          }`}>
+                            {tx.side}
+                          </span>
+                        )}
+                        {tx.explorer_url && (
+                          <span className="text-[9px] text-purple-500/60 ml-auto">on-chain ↗</span>
+                        )}
+                      </div>
+                      {tx.description && (
+                        <p className="text-[11px] text-gray-400 truncate mt-0.5">{tx.description}</p>
+                      )}
+                      <p className="text-[10px] text-gray-600 mt-0.5">{new Date(tx.timestamp * 1000).toLocaleString()}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-sm font-bold ${isIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {isIncoming ? '+' : '-'}{formatAlgo(tx.amount)}
+                      </p>
+                      {tx.tokens != null && tx.tokens > 0 && (
+                        <p className="text-[10px] text-gray-500">{(tx.tokens / 1e6).toFixed(2)} shares</p>
+                      )}
+                      {tx.fee > 0 && (
+                        <p className="text-[10px] text-gray-600">fee: {(tx.fee / 1e6).toFixed(4)}</p>
+                      )}
+                    </div>
+                  </>
+                );
+
+                return tx.explorer_url ? (
                   <a
                     key={tx.id}
                     href={tx.explorer_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-3 bg-gray-800/50 border border-gray-700/40 rounded-xl p-3 hover:border-gray-600 transition-colors"
+                    className="flex items-center gap-3 bg-gray-800/50 border border-gray-700/40 rounded-xl p-3 hover:border-purple-600/40 transition-colors"
                   >
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-lg ${isIncoming ? 'bg-emerald-900/30' : 'bg-red-900/30'}`}>
-                      <span className={cfg.color}>{cfg.icon}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-semibold ${cfg.color}`}>{cfg.text}</p>
-                      <p className="text-[10px] text-gray-500">{new Date(tx.timestamp * 1000).toLocaleString()}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-sm font-bold ${isIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {isIncoming ? '+' : '-'}{formatAlgo(tx.amount)}
-                      </p>
-                      {tx.fee > 0 && (
-                        <p className="text-[10px] text-gray-600">fee: {(tx.fee / 1e6).toFixed(4)}</p>
-                      )}
-                    </div>
+                    {inner}
                   </a>
+                ) : (
+                  <div
+                    key={tx.id}
+                    className="flex items-center gap-3 bg-gray-800/50 border border-gray-700/40 rounded-xl p-3"
+                  >
+                    {inner}
+                  </div>
                 );
               })}
             </div>

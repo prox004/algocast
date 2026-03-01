@@ -289,6 +289,7 @@ function buyTokens(side) {
         amount: microAlgos,
         tokens,
         timestamp: Math.floor(Date.now() / 1000),
+        txid,
       });
 
       // Auto-update probability from reserves

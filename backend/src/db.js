@@ -369,6 +369,7 @@ const statements = {
     VALUES (?, ?, ?, ?, ?, ?)
   `),
   findClaim: sqlite.prepare('SELECT * FROM claims WHERE user_id = ? AND market_id = ?'),
+  getClaimsByUser: sqlite.prepare('SELECT * FROM claims WHERE user_id = ? ORDER BY timestamp DESC'),
 
   // Admins
   insertAdmin: sqlite.prepare(`
@@ -609,6 +610,10 @@ const db = {
 
   findClaim(userId, marketId) {
     return statements.findClaim.get(userId, marketId) || null;
+  },
+
+  getClaimsByUser(userId) {
+    return statements.getClaimsByUser.all(userId);
   },
 
   // ── Admins ─────────────────────────────────────────────────────────────────

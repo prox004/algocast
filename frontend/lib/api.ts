@@ -132,14 +132,19 @@ export interface Trade {
 export interface WalletTransaction {
   id: string;
   type: string;
-  label: 'deposit' | 'bet_escrow' | 'claim_payout' | 'withdrawal' | 'contract_call' | 'unknown';
+  label: 'deposit' | 'bet_escrow' | 'claim_payout' | 'withdrawal' | 'contract_call' | 'order_escrow' | 'unknown';
+  description?: string;
+  side?: string | null;
   sender: string;
   receiver: string;
   amount: number;
+  tokens?: number | null;
   fee: number;
   timestamp: number;
   confirmed_round: number | null;
-  explorer_url: string;
+  explorer_url: string | null;
+  source?: 'db' | 'indexer';
+  status?: string;
 }
 
 export interface AIAnalysis {

@@ -420,8 +420,10 @@ router.post('/export-mnemonic', requireAuth, async (req, res) => {
 
 /**
  * GET /wallet/transactions (protected)
- * Fetch on-chain transaction history from Algorand Indexer.
- * Returns labeled transactions: deposit, escrow, claim, withdrawal, etc.
+ * Build transaction history from internal DB records (trades, claims, orders)
+ * complemented by Algorand Indexer when available.
+ *
+ * Returns a unified, sorted list of labeled transactions.
  */
 router.get('/transactions', requireAuth, async (req, res) => {
   try {
@@ -431,70 +433,167 @@ router.get('/transactions', requireAuth, async (req, res) => {
     const address = normalizeAddress(user.custodial_address);
     if (!address) return res.status(400).json({ error: 'No custodial address' });
 
-    const limit = parseInt(req.query.limit, 10) || 30;
-    const INDEXER_URL = process.env.INDEXER_URL || 'https://testnet-idx.algonode.cloud';
+    const limit = parseInt(req.query.limit, 10) || 50;
 
-    const url = `${INDEXER_URL}/v2/accounts/${address}/transactions?limit=${limit}`;
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      console.error('[wallet/transactions] Indexer error:', resp.status, await resp.text());
-      return res.status(502).json({ error: 'Indexer request failed' });
-    }
-
-    const data = await resp.json();
-    const rawTxns = data.transactions || [];
-
-    // Determine the escrow/deployer address for labelling
+    // Resolve escrow address for labelling indexer txns
     let escrowAddress = null;
     try {
       const { getEscrowAddress } = require('../algorand/transactionBuilder');
       escrowAddress = await getEscrowAddress();
     } catch (_) {}
 
-    const transactions = rawTxns.map((tx) => {
-      const sender = tx.sender || '';
-      const receiver = tx['payment-transaction']?.receiver || '';
-      const amount = tx['payment-transaction']?.amount || 0;
-      const fee = tx.fee || 0;
-      const roundTime = tx['round-time'] || 0;
-      const txId = tx.id || '';
-      const type = tx['tx-type'] || '';
+    const network = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();
+    const isLocalnet = network === 'local' || network === 'localnet';
+    const explorerBase = isLocalnet
+      ? null
+      : 'https://testnet.explorer.perawallet.app/tx';
 
-      // Label the transaction
-      let label = 'unknown';
-      if (type === 'pay') {
-        const isIncoming = receiver === address;
-        const isOutgoing = sender === address;
-        const involvesEscrow = escrowAddress && (sender === escrowAddress || receiver === escrowAddress);
+    // ── 1. Build from internal DB ──────────────────────────────────────────
+    const dbTransactions = [];
 
-        if (isIncoming && sender === escrowAddress) {
-          label = 'claim_payout'; // escrow → user (claim or order refund)
-        } else if (isIncoming) {
-          label = 'deposit'; // external → user
-        } else if (isOutgoing && receiver === escrowAddress) {
-          label = 'bet_escrow'; // user → escrow (buy/order)
-        } else if (isOutgoing) {
-          label = 'withdrawal'; // user → external
+    // Trades (buys)
+    const trades = db.getTradesByUser(req.user.id);
+    for (const t of trades) {
+      const market = db.getMarketById(t.market_id);
+      dbTransactions.push({
+        id: t.txid || `trade-${t.id}`,
+        type: 'pay',
+        label: 'bet_escrow',
+        description: `${t.side} on: ${market?.question?.slice(0, 60) || 'Unknown market'}${(market?.question?.length || 0) > 60 ? '…' : ''}`,
+        side: t.side,
+        sender: address,
+        receiver: escrowAddress || 'escrow',
+        amount: t.amount,
+        tokens: t.tokens,
+        fee: 1000,
+        timestamp: t.timestamp,
+        confirmed_round: null,
+        explorer_url: t.txid && explorerBase ? `${explorerBase}/${t.txid}` : null,
+        source: 'db',
+      });
+    }
+
+    // Claims (payouts)
+    const claims = db.getClaimsByUser(req.user.id);
+    for (const c of claims) {
+      const market = db.getMarketById(c.market_id);
+      dbTransactions.push({
+        id: c.txid || `claim-${c.id}`,
+        type: 'pay',
+        label: 'claim_payout',
+        description: `Claimed winnings: ${market?.question?.slice(0, 60) || 'Unknown market'}${(market?.question?.length || 0) > 60 ? '…' : ''}`,
+        side: null,
+        sender: escrowAddress || 'escrow',
+        receiver: address,
+        amount: c.payout,
+        tokens: null,
+        fee: 0,
+        timestamp: c.timestamp,
+        confirmed_round: null,
+        explorer_url: c.txid && explorerBase ? `${explorerBase}/${c.txid}` : null,
+        source: 'db',
+      });
+    }
+
+    // Orders (limit orders = escrow)
+    const orders = db.getOrdersByUser(req.user.id);
+    for (const o of orders) {
+      const market = db.getMarketById(o.market_id);
+      dbTransactions.push({
+        id: o.txid || `order-${o.id}`,
+        type: 'pay',
+        label: 'order_escrow',
+        description: `${o.side} limit @ ${(o.price * 100).toFixed(0)}¢ — ${market?.question?.slice(0, 50) || 'Market'}${(market?.question?.length || 0) > 50 ? '…' : ''}`,
+        side: o.side,
+        sender: address,
+        receiver: escrowAddress || 'escrow',
+        amount: o.amount,
+        tokens: null,
+        fee: 1000,
+        timestamp: o.created_at,
+        confirmed_round: null,
+        explorer_url: o.txid && explorerBase ? `${explorerBase}/${o.txid}` : null,
+        status: o.status,
+        source: 'db',
+      });
+    }
+
+    // ── 2. Try Indexer for deposits/withdrawals not in DB ──────────────────
+    let indexerTxns = [];
+    try {
+      const INDEXER_URL = process.env.INDEXER_URL
+        || (isLocalnet ? 'http://localhost:8980' : 'https://testnet-idx.algonode.cloud');
+
+      const url = `${INDEXER_URL}/v2/accounts/${address}/transactions?limit=${limit}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (resp.ok) {
+        const data = await resp.json();
+        const rawTxns = data.transactions || [];
+
+        // Collect txids we have from DB so we don't duplicate
+        const dbTxIds = new Set(dbTransactions.map((t) => t.id).filter(Boolean));
+
+        for (const tx of rawTxns) {
+          const txId = tx.id || '';
+          if (dbTxIds.has(txId)) continue; // skip duplicates
+
+          const sender = tx.sender || '';
+          const receiver = tx['payment-transaction']?.receiver || '';
+          const amount = tx['payment-transaction']?.amount || 0;
+          const fee = tx.fee || 0;
+          const roundTime = tx['round-time'] || 0;
+          const type = tx['tx-type'] || '';
+
+          let label = 'unknown';
+          let description = '';
+          if (type === 'pay') {
+            if (receiver === address && sender === escrowAddress) {
+              label = 'claim_payout';
+              description = 'On-chain payout from escrow';
+            } else if (receiver === address) {
+              label = 'deposit';
+              description = 'ALGO deposit';
+            } else if (sender === address && receiver === escrowAddress) {
+              label = 'bet_escrow';
+              description = 'Bet placed (escrow)';
+            } else if (sender === address) {
+              label = 'withdrawal';
+              description = 'ALGO withdrawal';
+            }
+          } else if (type === 'appl') {
+            label = 'contract_call';
+            description = 'Smart contract call';
+          }
+
+          indexerTxns.push({
+            id: txId,
+            type,
+            label,
+            description,
+            side: null,
+            sender,
+            receiver,
+            amount,
+            tokens: null,
+            fee,
+            timestamp: roundTime,
+            confirmed_round: tx['confirmed-round'] || null,
+            explorer_url: explorerBase ? `${explorerBase}/${txId}` : null,
+            source: 'indexer',
+          });
         }
-      } else if (type === 'appl') {
-        label = 'contract_call';
       }
+    } catch (indexerErr) {
+      // Indexer not available — fine, we still have DB records
+      console.log('[wallet/transactions] Indexer unavailable, using DB records only');
+    }
 
-      return {
-        id: txId,
-        type,
-        label,
-        sender,
-        receiver,
-        amount,
-        fee,
-        timestamp: roundTime,
-        confirmed_round: tx['confirmed-round'] || null,
-        explorer_url: `https://testnet.explorer.perawallet.app/tx/${txId}`,
-      };
-    });
+    // ── 3. Merge & sort ────────────────────────────────────────────────────
+    const all = [...dbTransactions, ...indexerTxns]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
 
-    return res.json({ transactions, address });
+    return res.json({ transactions: all, address });
   } catch (err) {
     console.error('[wallet/transactions]', err.message);
     return res.status(500).json({ error: 'Failed to fetch transactions' });
