@@ -202,34 +202,52 @@ export default function MarketDetailPage() {
       <AIInsightPanel marketId={market.id} />
 
       {/* Potential Payout Calculator */}
-      {!market.resolved && !expired && (
-        <div className="card">
-          <h2 className="font-semibold mb-3 text-sm">Potential Payouts (per 1 ALGO)</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-emerald-950/40 border border-emerald-800/30 rounded-xl p-3 text-center">
-              <p className="text-xs text-emerald-400/70 mb-1">If YES wins</p>
-              <p className="text-xl font-bold text-emerald-400">
-                {(1 / (marketProb || 0.01)).toFixed(2)} ALGO
-              </p>
-              <p className="text-[10px] text-emerald-500/60 mt-0.5">
-                {(1 / (marketProb || 0.01)).toFixed(2)}x multiplier
-              </p>
+      {!market.resolved && !expired && (() => {
+        const yesPrice = Math.max(marketProb, 0.01);
+        const noPrice = Math.max(1 - marketProb, 0.01);
+        const yesMultiplier = 1 / yesPrice;
+        const noMultiplier = 1 / noPrice;
+        const yesProfit = yesMultiplier - 1;
+        const noProfit = noMultiplier - 1;
+        return (
+          <div className="card">
+            <h2 className="font-semibold mb-3 text-sm">Share Prices & Potential Payouts</h2>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-emerald-950/40 border border-emerald-800/30 rounded-xl p-3 text-center">
+                <p className="text-xs text-emerald-400/70 mb-1">YES share</p>
+                <p className="text-2xl font-bold text-emerald-400">
+                  {(yesPrice * 100).toFixed(1)}¢
+                </p>
+                <p className="text-xs text-emerald-400/60 mt-1">
+                  Pays <span className="font-bold">1.00 ALGO</span> if YES wins
+                </p>
+                <div className="mt-2 pt-2 border-t border-emerald-800/30">
+                  <p className="text-[10px] text-gray-400">Per 1 ALGO invested</p>
+                  <p className="text-sm font-bold text-emerald-400">{yesMultiplier.toFixed(2)}x</p>
+                  <p className="text-[10px] text-emerald-500/50">+{yesProfit.toFixed(2)} ALGO profit</p>
+                </div>
+              </div>
+              <div className="bg-red-950/40 border border-red-800/30 rounded-xl p-3 text-center">
+                <p className="text-xs text-red-400/70 mb-1">NO share</p>
+                <p className="text-2xl font-bold text-red-400">
+                  {(noPrice * 100).toFixed(1)}¢
+                </p>
+                <p className="text-xs text-red-400/60 mt-1">
+                  Pays <span className="font-bold">1.00 ALGO</span> if NO wins
+                </p>
+                <div className="mt-2 pt-2 border-t border-red-800/30">
+                  <p className="text-[10px] text-gray-400">Per 1 ALGO invested</p>
+                  <p className="text-sm font-bold text-red-400">{noMultiplier.toFixed(2)}x</p>
+                  <p className="text-[10px] text-red-500/50">+{noProfit.toFixed(2)} ALGO profit</p>
+                </div>
+              </div>
             </div>
-            <div className="bg-red-950/40 border border-red-800/30 rounded-xl p-3 text-center">
-              <p className="text-xs text-red-400/70 mb-1">If NO wins</p>
-              <p className="text-xl font-bold text-red-400">
-                {(1 / ((1 - marketProb) || 0.01)).toFixed(2)} ALGO
-              </p>
-              <p className="text-[10px] text-red-500/60 mt-0.5">
-                {(1 / ((1 - marketProb) || 0.01)).toFixed(2)}x multiplier
-              </p>
-            </div>
+            <p className="text-[10px] text-gray-600 text-center mt-2">
+              Lower share price = higher odds = bigger payout. All payouts are on-chain.
+            </p>
           </div>
-          <p className="text-[10px] text-gray-600 text-center mt-2">
-            All payouts are on-chain. Lower probability = higher potential return.
-          </p>
-        </div>
-      )}
+        );
+      })()}
 
       {/* News Sentiment Analysis */}
       <SentimentPanel marketId={market.id} />

@@ -222,8 +222,20 @@ function buyTokens(side) {
         }
       }
 
-      // ── In-memory accounting (always runs — keeps DB consistent) ─────────
-      const tokens = microAlgos; // 1:1 hackathon model
+      // ── Odds-based token pricing (Polymarket-style) ───────────────────────
+      //
+      //   share_price  = probability of chosen side  (0.01 – 0.99)
+      //   tokens       = µALGO_spent / share_price   (number of shares)
+      //   Each winning share redeems for 1 µALGO on claim.
+      //
+      //   Example: buy YES at 60% → price = 0.60 → 1 ALGO buys 1.667 shares
+      //            If YES wins → payout = 1.667 ALGO → profit = 0.667 ALGO
+      //
+      const currentProb = marketProbability(market);
+      const sharePrice = side === 'YES'
+        ? Math.max(currentProb, 0.01)
+        : Math.max(1 - currentProb, 0.01);
+      const tokens = Math.floor(microAlgos / sharePrice);
 
       if (side === 'YES') {
         db.updateMarket(market.id, { yes_reserve: market.yes_reserve + microAlgos });
@@ -249,7 +261,16 @@ function buyTokens(side) {
       // Try to fill any matching limit orders after the price move
       const fills = matchOrders(updated);
 
-      return res.json({ success: true, tokens, trade, txid, probability: newProb, fills });
+      return res.json({
+        success: true,
+        tokens,
+        trade,
+        txid,
+        probability: newProb,
+        fills,
+        share_price: sharePrice,
+        potential_payout: tokens, // each winning token = 1 µALGO
+      });
     } catch (err) {
       console.error(`[buy-${side.toLowerCase()}]`, err.message);
       return res.status(500).json({ error: 'Buy failed' });
@@ -587,7 +608,12 @@ function matchOrders(marketInput) {
   return fills;
 }
 
-// Helper function to calculate trade profit/loss
+/**
+ * Calculate trade profit/loss in µALGO.
+ * Each winning share (token) redeems for 1 µALGO.
+ *   profit = tokens − amount  (positive for winners)
+ *   loss   = −amount          (losers lose their stake)
+ */
 function calculateTradeProfit(trade, market) {
   if (market.outcome === null) return null;
 
@@ -595,11 +621,9 @@ function calculateTradeProfit(trade, market) {
                    (trade.side === 'NO'  && market.outcome === 0);
 
   if (isWinner) {
-    // Winner gets 1 ALGO per token
-    return trade.tokens - (trade.amount / 1000000); // Convert microAlgos to Algos
+    return trade.tokens - trade.amount; // net profit in µALGO
   } else {
-    // Loser loses their investment
-    return -(trade.amount / 1000000); // Convert microAlgos to Algos
+    return -trade.amount; // loss in µALGO
   }
 }
 

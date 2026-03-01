@@ -26,7 +26,8 @@ export default function BuyPanel({ market, defaultSide = 'YES', onTrade, onClose
       const micro = Math.floor(amount * 1_000_000);
       const fn = side === 'YES' ? buyYes : buyNo;
       const res = await fn(market.id, micro);
-      setMsg(`Bought ${res.tokens.toLocaleString()} ${side} tokens!`);
+      const payout = (res.tokens / 1_000_000).toFixed(4);
+      setMsg(`Bought ${(res.tokens / 1_000_000).toFixed(2)} ${side} shares! Potential payout: ${payout} ALGO`);
       setTimeout(() => { onTrade?.(); }, 900);
     } catch (err: any) {
       setMsg(err.message);
@@ -37,6 +38,15 @@ export default function BuyPanel({ market, defaultSide = 'YES', onTrade, onClose
 
   const micro = Math.floor(amount * 1_000_000);
   const yesProb = market.market_probability ?? 0.5;
+
+  // Polymarket-style odds: share price = probability
+  const sharePrice = side === 'YES'
+    ? Math.max(yesProb, 0.01)
+    : Math.max(1 - yesProb, 0.01);
+  const shares = amount / sharePrice;           // number of shares
+  const potentialPayout = shares;                // each share redeems for 1 ALGO if you win
+  const potentialProfit = potentialPayout - amount;
+  const multiplier = 1 / sharePrice;
 
   return (
     // Bottom sheet overlay
@@ -121,15 +131,21 @@ export default function BuyPanel({ market, defaultSide = 'YES', onTrade, onClose
         {/* Potential winnings display */}
         {amount > 0 && (
           <div className="bg-gray-800/60 border border-gray-700/50 rounded-xl p-3 mb-4">
-            <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Potential Winnings</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Potential Winnings</p>
+              <span className="text-[10px] text-gray-500 font-mono">
+                @ {(sharePrice * 100).toFixed(1)}¢ per share
+              </span>
+            </div>
+
             <div className="flex justify-between items-center">
               <div className="text-center flex-1">
                 <p className="text-[10px] text-gray-500 mb-0.5">If {side} wins</p>
                 <p className="text-emerald-400 font-bold text-sm">
-                  {(amount / (side === 'YES' ? yesProb : (1 - yesProb))).toFixed(4)} ALGO
+                  {potentialPayout.toFixed(4)} ALGO
                 </p>
                 <p className="text-emerald-500/70 text-[10px]">
-                  +{(amount / (side === 'YES' ? yesProb : (1 - yesProb)) - amount).toFixed(4)} profit
+                  +{potentialProfit.toFixed(4)} profit
                 </p>
               </div>
               <div className="w-px h-8 bg-gray-700" />
@@ -139,9 +155,15 @@ export default function BuyPanel({ market, defaultSide = 'YES', onTrade, onClose
                 <p className="text-red-500/70 text-[10px]">-{amount.toFixed(4)} loss</p>
               </div>
             </div>
-            <p className="text-[10px] text-gray-600 text-center mt-2">
-              Multiplier: {(1 / (side === 'YES' ? yesProb : (1 - yesProb))).toFixed(2)}x
-            </p>
+
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-700/40">
+              <span className="text-[10px] text-gray-600">
+                {shares.toFixed(2)} shares × 1 ALGO each
+              </span>
+              <span className="text-[10px] text-gray-500 font-semibold">
+                {multiplier.toFixed(2)}x
+              </span>
+            </div>
           </div>
         )}
 
