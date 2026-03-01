@@ -36,6 +36,11 @@ INDEXER_TOKEN = os.getenv("ALGORAND_INDEXER_TOKEN", "")
 
 DEPLOYER_MNEMONIC = os.getenv("DEPLOYER_MNEMONIC", "")
 
+# ── Multisig address ───────────────────────────────────────────────────────────
+# The 2-of-3 admin multisig address authorised to resolve markets.
+# Falls back to DEPLOYER_ADDRESS for single-admin / LocalNet setups.
+MULTISIG_ADDRESS = os.getenv("MULTISIG_ADDRESS", "") or os.getenv("DEPLOYER_ADDRESS", "")
+
 # ── Contract constants ─────────────────────────────────────────────────────────
 
 # Minimum balance buffer kept in each contract account (microAlgos).

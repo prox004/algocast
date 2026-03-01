@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { getDatabase } from '../services/database.service';
 import { priceDataService } from '../services/priceData.service';
+import { isMarketLocked } from '../services/uma.service';
 
 const router = express.Router();
 
@@ -178,12 +179,23 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
  * PUT /api/markets/:id/resolve
  * Resolve a market with a result
  * Body: { result: 'yes' | 'no' }
+ *
+ * BLOCKED if market is UMA-locked.
  */
 router.put('/:id/resolve', async (req: Request, res: Response): Promise<void> => {
   try {
     const db = getDatabase();
     const { id } = req.params;
     const { result } = req.body;
+
+    // UMA LOCK CHECK
+    if (isMarketLocked(id)) {
+      res.status(403).json({
+        success: false,
+        error: 'Market is permanently locked by UMA Protocol. No modifications allowed — not even by admins.'
+      });
+      return;
+    }
 
     if (!result || (result !== 'yes' && result !== 'no')) {
       res.status(400).json({

@@ -49,6 +49,7 @@ from config import (
     KMD_TOKEN,
     NETWORK,
     DEPLOYER_MNEMONIC,
+    MULTISIG_ADDRESS,
     MIN_BALANCE_BUFFER,
     APPROVAL_TEAL,
     CLEAR_TEAL,
@@ -256,6 +257,11 @@ def deploy_market(question: str, close_ts: int) -> dict:
     create_method = next(m for m in contract_abi.methods if m.name == "create_market")
     signer        = algosdk.atomic_transaction_composer.AccountTransactionSigner(deployer_pk)
 
+    # Resolve the multisig address: use MULTISIG_ADDRESS env var if set,
+    # otherwise fall back to the deployer's own address (single-admin mode).
+    multisig_addr = MULTISIG_ADDRESS if MULTISIG_ADDRESS else deployer_addr
+    print(f"[i] Multisig/resolver address: {multisig_addr}")
+
     atc = algosdk.atomic_transaction_composer.AtomicTransactionComposer()
     atc.add_method_call(
         app_id=app_id,
@@ -263,7 +269,7 @@ def deploy_market(question: str, close_ts: int) -> dict:
         sender=deployer_addr,
         sp=sp_init,
         signer=signer,
-        method_args=[question, close_ts],
+        method_args=[question, close_ts, multisig_addr],
     )
 
     result_atc = atc.execute(algod, 4)

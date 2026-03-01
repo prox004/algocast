@@ -18,6 +18,7 @@ import AIInsightPanel from '@/components/AIInsightPanel';
 import SentimentPanel from '@/components/SentimentPanel';
 import PriceChart from '@/components/PriceChart';
 import OrderBook from '@/components/OrderBook';
+import UmaDisputePanel from '@/components/UmaDisputePanel';
 
 export default function MarketDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -267,6 +268,9 @@ export default function MarketDetailPage() {
           {claimMsg && <p className="text-sm mt-2 text-gray-300">{claimMsg}</p>}
         </div>
       )}
+
+      {/* UMA Dispute Resolution */}
+      <UmaDisputePanel marketId={market.id} />
 
       {/* Order Book */}
       <OrderBook

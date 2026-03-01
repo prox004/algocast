@@ -12,6 +12,7 @@ import adminRoutes from './routes/admin';
 import disputeRoutes from './routes/dispute';
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
 import { getAutoMarketGeneratorService } from './services/autoMarketGenerator.service';
+import { startUmaScheduler } from './services/uma.service';
 
 // JS routes (CommonJS)
 const authRoutes = require('./routes/auth');
@@ -113,6 +114,9 @@ app.use(errorHandler);
 const autoGen = getAutoMarketGeneratorService();
 autoGen.start();
 
+// Start UMA Protocol scheduler (processes expired dispute windows & voting periods)
+startUmaScheduler();
+
 // Start server
 app.listen(PORT, () => {
   // Seed curated markets into the in-memory DB before serving traffic
@@ -122,6 +126,7 @@ app.listen(PORT, () => {
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🤖 AI endpoints: http://localhost:${PORT}/ai/*`);
   console.log(`🎯 Auto Market Gen: Enabled (interval: ${process.env.AUTO_MARKET_GEN_INTERVAL_MIN || 5} min)`);
+  console.log(`⚖️  UMA Protocol: Enabled (dispute: 10min, voting: 10min, no bonds)`);
   
   // Log environment status
   const network = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();

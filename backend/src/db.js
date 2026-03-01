@@ -283,6 +283,56 @@ try {
   try { sqlite.exec('ALTER TABLE markets ADD COLUMN dispute_flag INTEGER DEFAULT 0;'); } catch (e) {}
 }
 
+// ── UMA Protocol Tables ─────────────────────────────────────────────────────
+
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS uma_resolutions (
+    id TEXT PRIMARY KEY,
+    market_id TEXT NOT NULL UNIQUE,
+    proposed_outcome INTEGER NOT NULL,
+    proposed_by TEXT NOT NULL,
+    evidence TEXT,
+    status TEXT NOT NULL DEFAULT 'PROPOSED',
+    proposed_at INTEGER NOT NULL,
+    dispute_window_ends INTEGER NOT NULL,
+    voting_ends INTEGER,
+    locked_at INTEGER,
+    final_outcome INTEGER,
+    lock_hash TEXT,
+    dispute_reason TEXT,
+    disputed_by TEXT,
+    disputed_at INTEGER,
+    FOREIGN KEY (market_id) REFERENCES markets(id),
+    FOREIGN KEY (proposed_by) REFERENCES admins(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_uma_resolutions_market ON uma_resolutions(market_id);
+  CREATE INDEX IF NOT EXISTS idx_uma_resolutions_status ON uma_resolutions(status);
+
+  CREATE TABLE IF NOT EXISTS uma_votes (
+    id TEXT PRIMARY KEY,
+    resolution_id TEXT NOT NULL,
+    admin_id TEXT NOT NULL,
+    vote INTEGER NOT NULL,
+    voted_at INTEGER NOT NULL,
+    FOREIGN KEY (resolution_id) REFERENCES uma_resolutions(id),
+    FOREIGN KEY (admin_id) REFERENCES admins(id),
+    UNIQUE(resolution_id, admin_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_uma_votes_resolution ON uma_votes(resolution_id);
+`);
+
+// Add uma_status column to markets table
+try {
+  sqlite.prepare('SELECT uma_status FROM markets LIMIT 1').get();
+} catch (err) {
+  console.log('[SQLite] Migrating markets table: adding uma_status column');
+  try { sqlite.exec("ALTER TABLE markets ADD COLUMN uma_status TEXT DEFAULT NULL;"); } catch (e) {}
+}
+
+console.log('[SQLite] UMA Protocol tables initialized');
+
 // ── Order Book Table ────────────────────────────────────────────────────────
 
 sqlite.exec(`
@@ -404,6 +454,36 @@ const statements = {
     WHERE m.dispute_flag = 1
     ORDER BY m.created_at DESC
   `),
+
+  // UMA Resolutions
+  insertUmaResolution: sqlite.prepare(`
+    INSERT INTO uma_resolutions (id, market_id, proposed_outcome, proposed_by, evidence, status, proposed_at, dispute_window_ends, voting_ends, locked_at, final_outcome, lock_hash, dispute_reason, disputed_by, disputed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  getUmaResolutionById: sqlite.prepare('SELECT * FROM uma_resolutions WHERE id = ?'),
+  getUmaResolutionByMarket: sqlite.prepare('SELECT * FROM uma_resolutions WHERE market_id = ? ORDER BY proposed_at DESC LIMIT 1'),
+  getUmaResolutionsByStatus: sqlite.prepare('SELECT * FROM uma_resolutions WHERE status = ? ORDER BY proposed_at DESC'),
+  updateUmaResolution: sqlite.prepare(`
+    UPDATE uma_resolutions SET status = ?, voting_ends = ?, locked_at = ?, final_outcome = ?, lock_hash = ?, dispute_reason = ?, disputed_by = ?, disputed_at = ? WHERE id = ?
+  `),
+  getAllUmaResolutions: sqlite.prepare('SELECT * FROM uma_resolutions ORDER BY proposed_at DESC'),
+  getExpiredDisputeWindows: sqlite.prepare(`
+    SELECT * FROM uma_resolutions WHERE status = 'PROPOSED' AND dispute_window_ends <= ?
+  `),
+  getExpiredVotingWindows: sqlite.prepare(`
+    SELECT * FROM uma_resolutions WHERE status = 'UMA_VOTING' AND voting_ends <= ?
+  `),
+
+  // UMA Votes
+  insertUmaVote: sqlite.prepare(`
+    INSERT INTO uma_votes (id, resolution_id, admin_id, vote, voted_at)
+    VALUES (?, ?, ?, ?, ?)
+  `),
+  getUmaVotesByResolution: sqlite.prepare('SELECT * FROM uma_votes WHERE resolution_id = ? ORDER BY voted_at ASC'),
+  getUmaVoteByAdmin: sqlite.prepare('SELECT * FROM uma_votes WHERE resolution_id = ? AND admin_id = ?'),
+
+  // Market UMA status
+  updateMarketUmaStatus: sqlite.prepare('UPDATE markets SET uma_status = ? WHERE id = ?'),
 
   // Orders (order book)
   insertOrder: sqlite.prepare(`
@@ -730,6 +810,104 @@ const db = {
 
   getDisputedMarkets() {
     return statements.getDisputedMarkets.all();
+  },
+
+  // ── UMA Protocol ───────────────────────────────────────────────────────────
+
+  createUmaResolution(resolution) {
+    try {
+      statements.insertUmaResolution.run(
+        resolution.id,
+        resolution.market_id,
+        resolution.proposed_outcome,
+        resolution.proposed_by,
+        resolution.evidence || null,
+        resolution.status || 'PROPOSED',
+        resolution.proposed_at || Date.now(),
+        resolution.dispute_window_ends,
+        resolution.voting_ends || null,
+        resolution.locked_at || null,
+        resolution.final_outcome ?? null,
+        resolution.lock_hash || null,
+        resolution.dispute_reason || null,
+        resolution.disputed_by || null,
+        resolution.disputed_at || null
+      );
+      return resolution;
+    } catch (err) {
+      console.error('[db.createUmaResolution]', err.message);
+      throw err;
+    }
+  },
+
+  getUmaResolutionById(id) {
+    return statements.getUmaResolutionById.get(id) || null;
+  },
+
+  getUmaResolutionByMarket(marketId) {
+    return statements.getUmaResolutionByMarket.get(marketId) || null;
+  },
+
+  getUmaResolutionsByStatus(status) {
+    return statements.getUmaResolutionsByStatus.all(status);
+  },
+
+  getAllUmaResolutions() {
+    return statements.getAllUmaResolutions.all();
+  },
+
+  updateUmaResolution(id, updates) {
+    const existing = this.getUmaResolutionById(id);
+    if (!existing) return null;
+    statements.updateUmaResolution.run(
+      updates.status !== undefined ? updates.status : existing.status,
+      updates.voting_ends !== undefined ? updates.voting_ends : existing.voting_ends,
+      updates.locked_at !== undefined ? updates.locked_at : existing.locked_at,
+      updates.final_outcome !== undefined ? updates.final_outcome : existing.final_outcome,
+      updates.lock_hash !== undefined ? updates.lock_hash : existing.lock_hash,
+      updates.dispute_reason !== undefined ? updates.dispute_reason : existing.dispute_reason,
+      updates.disputed_by !== undefined ? updates.disputed_by : existing.disputed_by,
+      updates.disputed_at !== undefined ? updates.disputed_at : existing.disputed_at,
+      id
+    );
+    return this.getUmaResolutionById(id);
+  },
+
+  getExpiredDisputeWindows(now) {
+    return statements.getExpiredDisputeWindows.all(now || Date.now());
+  },
+
+  getExpiredVotingWindows(now) {
+    return statements.getExpiredVotingWindows.all(now || Date.now());
+  },
+
+  createUmaVote(vote) {
+    try {
+      statements.insertUmaVote.run(
+        vote.id,
+        vote.resolution_id,
+        vote.admin_id,
+        vote.vote,
+        vote.voted_at || Date.now()
+      );
+      return vote;
+    } catch (err) {
+      console.error('[db.createUmaVote]', err.message);
+      throw err;
+    }
+  },
+
+  getUmaVotesByResolution(resolutionId) {
+    return statements.getUmaVotesByResolution.all(resolutionId);
+  },
+
+  getUmaVoteByAdmin(resolutionId, adminId) {
+    return statements.getUmaVoteByAdmin.get(resolutionId, adminId) || null;
+  },
+
+  updateMarketUmaStatus(marketId, umaStatus) {
+    statements.updateMarketUmaStatus.run(umaStatus, marketId);
+    return this.getMarketById(marketId);
   },
 
   // ── Market Resolution Helpers ──────────────────────────────────────────────

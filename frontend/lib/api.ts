@@ -367,6 +367,64 @@ export async function getMarketCurrentPrice(market_id: string): Promise<{ succes
 
 // resolveMarket removed — resolution is admin-only (2-of-3 multisig)
 
+// ── UMA Protocol ─────────────────────────────────────────────────────────────
+
+export interface UmaResolution {
+  id: string;
+  market_id: string;
+  proposed_outcome: number;
+  proposed_by: string;
+  evidence: string | null;
+  status: string;
+  proposed_at: number;
+  dispute_window_ends: number;
+  dispute_time_remaining_ms: number;
+  voting_ends: number | null;
+  voting_time_remaining_ms: number;
+  locked_at: number | null;
+  final_outcome: number | null;
+  lock_hash: string | null;
+  dispute_reason: string | null;
+  disputed_by: string | null;
+  is_locked: boolean;
+  is_immutable: boolean;
+  votes: {
+    total: number;
+    yes: number;
+    no: number;
+    details: Array<{ admin_id: string; vote: number; voted_at: number }>;
+  };
+}
+
+export async function getUmaResolution(market_id: string): Promise<{
+  success: boolean;
+  uma_active: boolean;
+  uma_resolution: UmaResolution | null;
+}> {
+  return request(`/dispute/${market_id}/uma`);
+}
+
+export async function raiseUmaDispute(market_id: string, reason: string): Promise<{
+  success: boolean;
+  message: string;
+  uma_resolution: any;
+}> {
+  return request(`/dispute/${market_id}`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function getUmaTimeRemaining(market_id: string): Promise<{
+  success: boolean;
+  phase: string | null;
+  time_remaining_ms: number;
+  time_remaining_formatted: string;
+  status: string;
+}> {
+  return request(`/dispute/${market_id}/time`);
+}
+
 // ── Order Book ───────────────────────────────────────────────────────────────
 
 export interface OrderBookLevel {
