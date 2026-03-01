@@ -277,12 +277,14 @@ function buyTokens(side) {
             appId:            market.app_id,
             appAddress:       market.app_address,
             asaId,
+            yesAsaId:         market.yes_asa_id,
+            noAsaId:          market.no_asa_id,
             amountMicroAlgos: microAlgos,
           });
           txid = await broadcast(signed);
         } catch (txnErr) {
           console.error(`[buy-${side.toLowerCase()} txn]`, txnErr.message);
-          return res.status(502).json({ error: 'On-chain transaction failed' });
+          return res.status(502).json({ error: `On-chain transaction failed: ${txnErr.message}` });
         }
       } else {
         // ── Escrow mode: send ALGO from user → platform escrow on-chain ──
@@ -301,7 +303,7 @@ function buyTokens(side) {
           console.log(`[buy-${side.toLowerCase()}] On-chain escrow tx: ${txid}`);
         } catch (txnErr) {
           console.error(`[buy-${side.toLowerCase()} escrow-txn]`, txnErr.message);
-          return res.status(502).json({ error: 'On-chain transaction failed' });
+          return res.status(502).json({ error: `On-chain transaction failed: ${txnErr.message}` });
         }
       }
 
@@ -426,7 +428,7 @@ router.post('/claim', requireAuth, async (req, res) => {
         txid = await broadcast(signed);
       } catch (txnErr) {
         console.error('[claim contract-txn]', txnErr.message);
-        return res.status(502).json({ error: 'On-chain claim failed' });
+        return res.status(502).json({ error: `On-chain claim failed: ${txnErr.message}` });
       }
     } else {
       // ── Escrow mode: send ALGO from platform escrow → user on-chain ──────
@@ -438,7 +440,7 @@ router.post('/claim', requireAuth, async (req, res) => {
         console.log(`[claim] On-chain payout ${payout / 1e6} ALGO to ${normalizeAddress(user.custodial_address)}. Tx: ${txid}`);
       } catch (txnErr) {
         console.error('[claim escrow-txn]', txnErr.message);
-        return res.status(502).json({ error: 'On-chain payout failed' });
+        return res.status(502).json({ error: `On-chain payout failed: ${txnErr.message}` });
       }
     }
 
@@ -544,7 +546,7 @@ router.post('/place-order', requireAuth, async (req, res) => {
       console.log(`[place-order] On-chain escrow tx: ${txid}`);
     } catch (txnErr) {
       console.error('[place-order escrow-txn]', txnErr.message);
-      return res.status(502).json({ error: 'On-chain escrow transaction failed' });
+      return res.status(502).json({ error: `On-chain escrow transaction failed: ${txnErr.message}` });
     }
 
     // Sync balance

@@ -366,7 +366,7 @@ router.post('/withdraw', requireAuth, async (req, res) => {
       );
     } catch (txnErr) {
       console.error('[withdraw txn]', txnErr.message);
-      return res.status(502).json({ error: 'Blockchain transaction failed' });
+      return res.status(502).json({ error: `Blockchain transaction failed: ${txnErr.message}` });
     }
 
     // Sync balance from chain after successful withdrawal

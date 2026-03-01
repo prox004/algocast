@@ -191,7 +191,7 @@ export async function signBuyGroup(params: BuyGroupParams): Promise<Uint8Array[]
     appArgs: [
       algosdk.encodeUint64(0),   // ABI method selector placeholder — overwritten below
     ],
-    foreignAssets:   [asaId],
+    foreignAssets: [asaId],
     suggestedParams: { ...sp, fee: 2000 },
   });
 
@@ -213,8 +213,7 @@ export async function signBuyGroup(params: BuyGroupParams): Promise<Uint8Array[]
   });
 
   const built = atc.buildGroup();
-  // Re-assign group ID and sign
-  algosdk.assignGroupID(built.map((b) => b.txn));
+  // Note: buildGroup() already assigns group IDs — do NOT call assignGroupID again.
   const signed = built.map((b) => b.txn.signTxn(sk));
 
   // Wipe sk immediately

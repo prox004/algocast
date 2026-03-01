@@ -83,14 +83,18 @@ async function broadcast(signedTxns) {
  *   appId: number,
  *   appAddress: string,
  *   asaId: number,
+ *   yesAsaId: number,
+ *   noAsaId: number,
  *   amountMicroAlgos: number,
  * }} params
  * @returns {Promise<Uint8Array[]>} signed txn bytes (pair)
  */
 async function signBuyGroup(side, params) {
-  const { fromAddress, encryptedKey, appId, appAddress, asaId, amountMicroAlgos } = params;
+  const { fromAddress, encryptedKey, appId, appAddress, asaId, yesAsaId, noAsaId, amountMicroAlgos } = params;
   if (amountMicroAlgos <= 0) throw new Error('amountMicroAlgos must be > 0');
   if (!asaId || asaId <= 0) throw new Error(`Invalid asaId for ${side} buy: ${asaId}. Market may have null yes_asa_id/no_asa_id — sync from chain first.`);
+
+  const allAsaIds = [...new Set([asaId, yesAsaId, noAsaId].filter((id) => id != null && id > 0))];
 
   const algod      = getAlgodClient();
   const sp         = await algod.getTransactionParams().do();
@@ -118,13 +122,14 @@ async function signBuyGroup(side, params) {
     suggestedParams: { ...sp, fee: 2000, flatFee: true },
     signer,
     // Both ASAs must be declared so the contract can reference YES and NO in global state.
-    // Filter out null/0 to prevent algosdk from silently producing empty foreignAssets.
-    foreignAssets:   [asaId].filter((id) => id != null && id > 0),
-    foreignAccounts: [fromAddress],  // buyer account must be accessible for inner ASA transfer
+    // The AVM requires any asset referenced via app_global_get + itxn_field to be in foreignAssets.
+    // Filter out null/0/duplicates to prevent algosdk from producing invalid references.
+    appForeignAssets: allAsaIds,
+    appAccounts:      [fromAddress],  // buyer account must be accessible for inner ASA transfer
   });
 
   const built = atc.buildGroup();
-  algosdk.assignGroupID(built.map((b) => b.txn));
+  // Note: buildGroup() already assigns group IDs — do NOT call assignGroupID again.
   const signed = built.map((b) => b.txn.signTxn(sk));
 
   // Wipe secret key immediately after signing
@@ -163,7 +168,7 @@ async function signClaim(params) {
     sender:          fromAddress,
     suggestedParams: { ...sp, fee: 4000, flatFee: true },
     signer,
-    foreignAssets:   [winningAsaId],
+    appForeignAssets: [winningAsaId],
   });
 
   const built  = atc.buildGroup();
