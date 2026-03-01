@@ -158,10 +158,19 @@ export default function AIInsightPanel({ marketId }: Props) {
 
           {/* Data Sources */}
           <div className="flex items-center justify-between text-xs text-gray-600 border-t border-gray-800 pt-2">
-            <span>📰 {sentiment.sources.news_count} articles</span>
+            <span className={sentiment.sources.news_count > 0 ? 'text-emerald-400' : 'text-red-400'}>
+              📰 {sentiment.sources.news_count} articles
+            </span>
             <span>💬 {sentiment.sources.social_mentions} mentions</span>
             <span>📊 {(sentiment.sources.trend_volume / 1000).toFixed(0)}k volume</span>
           </div>
+
+          {/* News Status Indicator */}
+          {sentiment.sources.news_count === 0 && (
+            <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-xs text-yellow-400">
+              ⚠️ No recent news found - analysis based on general knowledge
+            </div>
+          )}
 
           {/* Summary */}
           <p className="text-xs text-gray-400 mt-3 leading-relaxed">

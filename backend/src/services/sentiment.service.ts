@@ -298,7 +298,8 @@ Respond with ONLY valid JSON, no markdown.`;
     newsArticles: NewsArticle[] = []
   ): Promise<{ score: number; confidence: number; trendVolume: number; reasoning: string }> {
     if (!isGeminiReady()) {
-      return { score: 0, confidence: 0.5, trendVolume: 50000, reasoning: '' };
+      console.warn('[SentimentService] ⚠️  Gemini API not ready - using fallback AI analysis');
+      return { score: 0, confidence: 0.5, trendVolume: 50000, reasoning: 'Gemini API not available' };
     }
 
     try {
@@ -308,8 +309,10 @@ Respond with ONLY valid JSON, no markdown.`;
           `${i + 1}. [${a.source}] "${a.title}" (${a.sentiment})`
         ).join('\n');
         newsContext = `\n\nREAL-TIME NEWS (fetched just now — use these to inform your analysis):\n${headlines}\n\nBase your analysis heavily on these real news articles. They represent the current state of events.`;
+        console.log(`[SentimentService] 🤖 AI analysis with ${newsArticles.length} news articles`);
       } else {
         newsContext = '\n\nNo recent news articles were found for this topic. Base your analysis on general knowledge.';
+        console.log(`[SentimentService] 🤖 AI analysis without news articles (fallback to general knowledge)`);
       }
 
       const prompt = `You are an expert prediction market analyst. Analyze the likelihood of the following event based on the real news provided.
@@ -330,24 +333,35 @@ IMPORTANT:
 
 Respond with ONLY valid JSON, no markdown.`;
 
+      console.log(`[SentimentService] 🧠 Sending prompt to Gemini AI...`);
+
       const content = await chatCompletion(
         [{ role: 'user', content: prompt }],
         { temperature: 0.2, maxOutputTokens: 350 }
       );
 
+      console.log(`[SentimentService] 📝 Gemini AI response received (${content.length} chars)`);
+
       const parsed = this.parseJSON(content);
-      console.log(`[SentimentService] AI news-informed analysis: score=${parsed.score}, confidence=${parsed.confidence}`);
-      console.log(`[SentimentService] AI reasoning: ${parsed.reasoning}`);
+      
+      const score = Math.max(-1, Math.min(1, parsed.score || 0));
+      const confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));
+      
+      console.log(`[SentimentService] ✅ AI analysis complete: score=${score.toFixed(3)}, confidence=${confidence.toFixed(3)}`);
+      console.log(`[SentimentService] 💭 AI reasoning: ${parsed.reasoning || 'No reasoning provided'}`);
 
       return {
-        score: Math.max(-1, Math.min(1, parsed.score || 0)),
-        confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
+        score,
+        confidence,
         trendVolume: 75000,
-        reasoning: parsed.reasoning || ''
+        reasoning: parsed.reasoning || 'AI analysis completed'
       };
     } catch (error: any) {
-      console.error('[SentimentService] AI sentiment error:', error);
-      return { score: 0, confidence: 0.5, trendVolume: 50000, reasoning: '' };
+      console.error('[SentimentService] ❌ AI sentiment analysis failed:', error.message);
+      if (error.message.includes('API key')) {
+        console.error('[SentimentService] 🔑 Gemini API authentication issue - check GEMINI_API_KEY');
+      }
+      return { score: 0, confidence: 0.5, trendVolume: 50000, reasoning: 'AI analysis failed: ' + error.message };
     }
   }
 
@@ -357,12 +371,21 @@ Respond with ONLY valid JSON, no markdown.`;
     question: string
   ): Promise<{ score: number; confidence: number; articleCount: number; mentions: number; articles: NewsArticle[] }> {
     if (!this.newsApiKey) {
+      console.warn('[SentimentService] ⚠️  NEWS_API_KEY not configured - news analysis disabled');
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
 
+    console.log(`[SentimentService] 🔍 Analyzing question: "${question}"`);
+    
     const understanding = await this.understandQuestion(question);
+    console.log(`[SentimentService] 📝 Topic understanding:`, {
+      topic: understanding.topic,
+      queries: understanding.queries,
+      entities: understanding.entities
+    });
 
     if (understanding.queries.length === 0) {
+      console.warn('[SentimentService] ⚠️  No search queries generated');
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
 
@@ -372,6 +395,8 @@ Respond with ONLY valid JSON, no markdown.`;
 
       for (const query of understanding.queries) {
         try {
+          console.log(`[SentimentService] 🔎 Searching NewsAPI for: "${query}"`);
+          
           const response = await axios.get('https://newsapi.org/v2/everything', {
             params: {
               q: query,
@@ -383,20 +408,35 @@ Respond with ONLY valid JSON, no markdown.`;
             timeout: 6000
           });
 
-          for (const article of (response.data.articles || [])) {
+          const articles = response.data.articles || [];
+          console.log(`[SentimentService] 📰 Query "${query}" → ${articles.length} articles found`);
+          
+          if (response.data.status === 'error') {
+            console.error(`[SentimentService] ❌ NewsAPI error:`, response.data);
+          }
+
+          for (const article of articles) {
             const url = article.url || '';
             if (!seenUrls.has(url)) {
               seenUrls.add(url);
               allArticles.push(article);
+              console.log(`[SentimentService] ➕ Added: "${article.title}" from ${article.source?.name}`);
             }
           }
-          console.log(`[SentimentService] Query "${query}" → ${response.data.articles?.length || 0} articles`);
         } catch (err: any) {
-          console.warn(`[SentimentService] Query failed: "${query}"`);
+          console.error(`[SentimentService] ❌ Query failed: "${query}" - ${err.message}`);
+          if (err.response?.status === 401) {
+            console.error('[SentimentService] 🔑 NewsAPI authentication failed - check API key');
+          } else if (err.response?.status === 429) {
+            console.error('[SentimentService] 🚫 NewsAPI rate limit exceeded');
+          }
         }
       }
 
+      console.log(`[SentimentService] 📊 Total articles collected: ${allArticles.length}`);
+
       if (allArticles.length === 0) {
+        console.warn('[SentimentService] ⚠️  No articles found for any query');
         return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
       }
 
@@ -406,9 +446,11 @@ Respond with ONLY valid JSON, no markdown.`;
         understanding.entities
       );
 
+      console.log(`[SentimentService] ✅ Relevant articles after filtering: ${relevantArticles.length}`);
+
       return this.scoreSentiment(relevantArticles);
     } catch (error: any) {
-      console.error('[SentimentService] News sentiment error:', error);
+      console.error('[SentimentService] ❌ News sentiment error:', error.message);
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
   }
@@ -420,16 +462,27 @@ Respond with ONLY valid JSON, no markdown.`;
     market: any
   ): Promise<{ score: number; confidence: number; articleCount: number; mentions: number; articles: NewsArticle[] }> {
     if (!this.newsApiKey) {
+      console.warn('[SentimentService] ⚠️  NEWS_API_KEY not configured - contextual news analysis disabled');
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
 
-    console.log(`[SentimentService] Analyzing context for market: ${market?.id}`);
+    console.log(`[SentimentService] 🎯 Contextual analysis for market: ${market?.id || 'unknown'}`);
+    console.log(`[SentimentService] 📝 Question: "${question}"`);
+    if (market?.tweet_content) {
+      console.log(`[SentimentService] 🐦 Tweet: "${market.tweet_content}"`);
+    }
     
     // Step 1: Analyze tweet + question context
     const context = await this.analyzeMarketContext(question, market);
     
+    console.log(`[SentimentService] 🧠 Context analysis result:`, {
+      queries: context.searchQueries.length,
+      entities: context.keyEntities.length,
+      topic: context.topic
+    });
+    
     if (context.searchQueries.length === 0) {
-      console.log(`[SentimentService] No valid search queries generated`);
+      console.warn(`[SentimentService] ⚠️  No valid search queries generated from context`);
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
 
@@ -439,10 +492,12 @@ Respond with ONLY valid JSON, no markdown.`;
       const now = new Date();
       const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
+      console.log(`[SentimentService] 📅 Searching for news from ${yesterday.toISOString()} to ${now.toISOString()}`);
+
       // Step 2: Fetch recent news with enhanced queries
       for (const query of context.searchQueries) {
         try {
-          console.log(`[SentimentService] Searching news for: "${query}"`);
+          console.log(`[SentimentService] 🔍 NewsAPI search: "${query}"`);
           
           const response = await axios.get('https://newsapi.org/v2/everything', {
             params: {
@@ -457,10 +512,14 @@ Respond with ONLY valid JSON, no markdown.`;
           });
 
           const articles = response.data.articles || [];
-          console.log(`[SentimentService] Query "${query}" → ${articles.length} recent articles`);
+          console.log(`[SentimentService] 📰 Query "${query}" → ${articles.length} recent articles`);
+
+          if (response.data.status === 'error') {
+            console.error(`[SentimentService] ❌ NewsAPI error for query "${query}":`, response.data);
+          }
 
           if (articles.length === 0) {
-            console.log(`[SentimentService] No articles found for "${query}"`);
+            console.log(`[SentimentService] 📭 No articles found for "${query}"`);
           }
 
           for (const article of articles) {
@@ -468,23 +527,27 @@ Respond with ONLY valid JSON, no markdown.`;
             if (!seenUrls.has(url) && this.isRecentArticle(article.publishedAt)) {
               seenUrls.add(url);
               allArticles.push(article);
-              console.log(`[SentimentService] Added article: "${article.title}" from ${article.source?.name}`);
+              console.log(`[SentimentService] ➕ Added: "${article.title}" from ${article.source?.name} (${article.publishedAt})`);
             }
           }
         } catch (err: any) {
-          console.warn(`[SentimentService] Query failed: "${query}" - ${err.message}`);
+          console.error(`[SentimentService] ❌ Query failed: "${query}" - ${err.message}`);
           if (err.response?.status === 401) {
-            console.error('[SentimentService] News API authentication failed - check API key');
+            console.error('[SentimentService] 🔑 NewsAPI authentication failed - check NEWS_API_KEY');
+          } else if (err.response?.status === 429) {
+            console.error('[SentimentService] 🚫 NewsAPI rate limit exceeded - consider upgrading plan');
+          } else if (err.response?.data) {
+            console.error('[SentimentService] 📄 NewsAPI response:', err.response.data);
           }
         }
       }
 
+      console.log(`[SentimentService] 📊 Total articles collected: ${allArticles.length}`);
+
       if (allArticles.length === 0) {
-        console.log(`[SentimentService] No recent articles found`);
+        console.warn(`[SentimentService] 📭 No recent articles found for any query`);
         return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
       }
-
-      console.log(`[SentimentService] Found ${allArticles.length} total articles, filtering for relevance...`);
 
       // Step 3: Enhanced relevance filtering with context
       const relevantArticles = await this.filterByContextualRelevance(
@@ -492,11 +555,15 @@ Respond with ONLY valid JSON, no markdown.`;
         context
       );
 
-      console.log(`[SentimentService] ${relevantArticles.length} articles passed relevance filter`);
+      console.log(`[SentimentService] ✅ Articles after relevance filtering: ${relevantArticles.length}/${allArticles.length}`);
 
-      return this.scoreSentiment(relevantArticles);
+      const result = this.scoreSentiment(relevantArticles);
+      
+      console.log(`[SentimentService] 🎯 Final sentiment score: ${result.score.toFixed(3)} (${result.articleCount} articles)`);
+      
+      return result;
     } catch (error: any) {
-      console.error('[SentimentService] Contextual news sentiment error:', error);
+      console.error('[SentimentService] ❌ Contextual news sentiment error:', error.message);
       return { score: 0, confidence: 0.3, articleCount: 0, mentions: 0, articles: [] };
     }
   }
