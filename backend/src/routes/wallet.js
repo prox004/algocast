@@ -448,7 +448,7 @@ router.get('/transactions', requireAuth, async (req, res) => {
     let escrowAddress = null;
     try {
       const { getEscrowAddress } = require('../algorand/transactionBuilder');
-      escrowAddress = getEscrowAddress();
+      escrowAddress = await getEscrowAddress();
     } catch (_) {}
 
     const transactions = rawTxns.map((tx) => {

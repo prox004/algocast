@@ -384,21 +384,54 @@ let _cachedEscrowAddress = null;
 /**
  * Returns the deployer/escrow address used as the platform's pool.
  * All bets flow through this address; payouts come from it.
- * @returns {string} Algorand address
+ * Async because it may need to query KMD on localnet.
+ * @returns {Promise<string>} Algorand address
  */
-function getEscrowAddress() {
+async function getEscrowAddress() {
   if (_cachedEscrowAddress) return _cachedEscrowAddress;
 
   const network = (process.env.ALGORAND_NETWORK || 'testnet').toLowerCase();
 
   if (network === 'local' || network === 'localnet') {
-    // On localnet, use the env var or fallback (KMD address set at deploy time)
-    const addr = process.env.ESCROW_ADDRESS || '';
-    if (!addr) {
-      console.warn('[getEscrowAddress] ESCROW_ADDRESS not set for localnet — deposits will fail');
+    // If ESCROW_ADDRESS is set in env, use it directly
+    if (process.env.ESCROW_ADDRESS) {
+      _cachedEscrowAddress = process.env.ESCROW_ADDRESS;
+      return _cachedEscrowAddress;
     }
-    _cachedEscrowAddress = addr;
-    return addr;
+
+    // Auto-discover from KMD (same as fundUserAccount)
+    const KMD_URL   = process.env.KMD_URL   || 'http://localhost:4002';
+    const KMD_TOKEN = process.env.KMD_TOKEN  || 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+    try {
+      let kmdServer, kmdPort;
+      try {
+        const u = new URL(KMD_URL);
+        kmdServer = `${u.protocol}//${u.hostname}`;
+        kmdPort   = u.port ? Number(u.port) : '';
+      } catch {
+        kmdServer = KMD_URL;
+        kmdPort   = '';
+      }
+
+      const kmd     = new algosdk.Kmd(KMD_TOKEN, kmdServer, kmdPort);
+      const wallets = await kmd.listWallets();
+      const defWallet = wallets.wallets.find((w) => w.name === 'unencrypted-default-wallet');
+      if (!defWallet) throw new Error('KMD default wallet not found');
+
+      const { wallet_handle_token } = await kmd.initWalletHandle(defWallet.id, '');
+      const { addresses }           = await kmd.listKeys(wallet_handle_token);
+      await kmd.releaseWalletHandle(wallet_handle_token);
+
+      if (!addresses || addresses.length === 0) throw new Error('No KMD accounts');
+
+      _cachedEscrowAddress = addresses[0];
+      console.log(`[getEscrowAddress] Resolved from KMD: ${_cachedEscrowAddress}`);
+      return _cachedEscrowAddress;
+    } catch (err) {
+      console.error('[getEscrowAddress] KMD auto-discovery failed:', err.message);
+      throw new Error('ESCROW_ADDRESS not set and KMD auto-discovery failed');
+    }
   }
 
   // TestNet: derive from deployer mnemonic

@@ -35,6 +35,25 @@ const { normalizeAddress } = require('../wallet/custodialWallet');
 
 const router = express.Router();
 
+// Minimum on-chain balance to keep account alive (0.1 ALGO + 1 txn fee)
+const MIN_BALANCE = 101_000;
+
+/**
+ * Read the on-chain ALGO balance (in µALGO) of an Algorand address.
+ * Returns 0 if the account doesn't exist yet.
+ */
+async function getOnChainBalance(address) {
+  try {
+    const algod = getAlgodClient();
+    const info  = await algod.accountInformation(address).do();
+    return Number(info.amount ?? info['amount'] ?? 0);
+  } catch (err) {
+    // Account not found / not funded yet
+    if (err.status === 404 || /not found/i.test(err.message)) return 0;
+    throw err;
+  }
+}
+
 /** Compute market probability from reserves */
 function marketProbability(market) {
   const total = market.yes_reserve + market.no_reserve;
@@ -196,17 +215,15 @@ function buyTokens(side) {
         return res.status(400).json({ error: 'Insufficient balance' });
       }
 
-      // Deduct balance BEFORE any async operation
-      db.updateUser(user.id, { balance: user.balance - microAlgos });
-
       let txid = null;
 
       // ── On-chain mode ────────────────────────────────────────────────────
       if (market.app_id && market.app_address && isContractReady()) {
+        // Smart-contract path: atomic [PaymentTxn + ABI app-call]
         const asaId = side === 'YES' ? market.yes_asa_id : market.no_asa_id;
         try {
           const signed = await signBuyGroup(side, {
-            fromAddress:      user.custodial_address,
+            fromAddress:      normalizeAddress(user.custodial_address),
             encryptedKey:     user.encrypted_private_key,
             appId:            market.app_id,
             appAddress:       market.app_address,
@@ -215,12 +232,33 @@ function buyTokens(side) {
           });
           txid = await broadcast(signed);
         } catch (txnErr) {
-          // Rollback balance on txn failure
-          db.updateUser(user.id, { balance: user.balance }); // re-fetch restores
           console.error(`[buy-${side.toLowerCase()} txn]`, txnErr.message);
-          return res.status(502).json({ error: 'On-chain transaction failed, balance restored' });
+          return res.status(502).json({ error: 'On-chain transaction failed' });
+        }
+      } else {
+        // ── Escrow mode: send ALGO from user → platform escrow on-chain ──
+        try {
+          const fromAddress  = normalizeAddress(user.custodial_address);
+          const escrowAddress = await getEscrowAddress();
+          if (!escrowAddress) {
+            throw new Error('ESCROW_ADDRESS not configured');
+          }
+          txid = await sendAlgo(
+            user.encrypted_private_key,
+            fromAddress,
+            escrowAddress,
+            microAlgos,
+          );
+          console.log(`[buy-${side.toLowerCase()}] On-chain escrow tx: ${txid}`);
+        } catch (txnErr) {
+          console.error(`[buy-${side.toLowerCase()} escrow-txn]`, txnErr.message);
+          return res.status(502).json({ error: 'On-chain transaction failed' });
         }
       }
+
+      // Sync DB balance from chain after the on-chain transfer
+      const newOnChainBalance = await getOnChainBalance(normalizeAddress(user.custodial_address));
+      db.updateUser(user.id, { balance: newOnChainBalance });
 
       // ── Odds-based token pricing (Polymarket-style) ───────────────────────
       //
@@ -435,7 +473,7 @@ router.post('/place-order', requireAuth, async (req, res) => {
     // On-chain escrow: send ALGO to platform escrow
     let txid = null;
     try {
-      const escrowAddress = getEscrowAddress();
+      const escrowAddress = await getEscrowAddress();
       txid = await sendAlgo(
         user.encrypted_private_key,
         fromAddress,
