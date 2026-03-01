@@ -107,10 +107,10 @@ export class MarketRecommenderService {
     }
 
     // Volatility consideration
-    if (typeof market.volatility === 'string') {
-      if (market.volatility === 'low' && userProfile.risk_tolerance === 'low') {
+    if (typeof market.volatility === 'number') {
+      if (market.volatility < 0.3 && userProfile.risk_tolerance === 'low') {
         reasons.push('Low volatility market suitable for conservative approach');
-      } else if (market.volatility === 'high' && userProfile.risk_tolerance === 'high') {
+      } else if (market.volatility > 0.7 && userProfile.risk_tolerance === 'high') {
         reasons.push('High volatility market with potential for significant moves');
       }
     }

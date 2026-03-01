@@ -302,6 +302,54 @@ export async function getSentiment(market_id: string): Promise<any> {
   return request(`/ai/sentiment/${market_id}`);
 }
 
+// ── Personalized AI ─────────────────────────────────────────────────────────
+
+export async function getTradingCoach(user_id: string, timeframe_days?: number): Promise<any> {
+  return request('/ai/trading-coach', {
+    method: 'POST',
+    body: JSON.stringify({ user_id, timeframe_days })
+  });
+}
+
+export async function getMarketRecommendations(user_id: string, max_recommendations?: number): Promise<any> {
+  return request('/ai/market-recommendations', {
+    method: 'POST',
+    body: JSON.stringify({ user_id, max_recommendations })
+  });
+}
+
+export async function getPositionSizing(
+  user_bankroll: number,
+  risk_tolerance: string,
+  ai_probability: number,
+  market_probability: number,
+  market_category?: string,
+  user_id?: string
+): Promise<any> {
+  return request('/ai/position-sizing', {
+    method: 'POST',
+    body: JSON.stringify({
+      user_bankroll,
+      risk_tolerance,
+      ai_probability,
+      market_probability,
+      market_category,
+      user_id
+    })
+  });
+}
+
+export async function getWeeklyPerformance(user_id: string, week_start?: number, week_end?: number): Promise<any> {
+  return request('/ai/weekly-performance', {
+    method: 'POST',
+    body: JSON.stringify({ user_id, week_start, week_end })
+  });
+}
+
+export async function getComprehensiveAnalysis(user_id: string): Promise<any> {
+  return request(`/ai/comprehensive-analysis/${user_id}`);
+}
+
 export async function getSentimentAnalysis(market_id: string): Promise<SentimentResult> {
   const raw = await request<any>(`/ai/sentiment/${market_id}`);
   
@@ -312,7 +360,6 @@ export async function getSentimentAnalysis(market_id: string): Promise<Sentiment
     'NEUTRAL': 'Neutral',
   };
   
-  const confidenceMap: Record<number, 'High' | 'Medium' | 'Low'> = {};
   const getConfidence = (c: number): 'High' | 'Medium' | 'Low' => 
     c >= 0.7 ? 'High' : c >= 0.4 ? 'Medium' : 'Low';
   

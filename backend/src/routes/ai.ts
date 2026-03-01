@@ -318,10 +318,10 @@ router.get('/analysis/:market_id', async (req, res) => {
       summary: market.reasoning || `Based on market data, the AI estimates a ${(market.ai_probability * 100).toFixed(1)}% probability of YES outcome. This assessment incorporates current market sentiment and available trend data.`,
     };
     
-    res.json(analysis);
+    return res.json(analysis);
   } catch (error) {
     console.error('AI analysis error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to get AI analysis',
       message: error instanceof Error ? error.message : 'Unknown error'

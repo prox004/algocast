@@ -160,10 +160,10 @@ export class PersonalizedAIService {
     return {
       user_id: userId,
       total_trades: 0,
-      win_rate: 0.5,
+      win_rate: 0, // Changed from 0.5 to 0 for new users
       total_volume: 0,
       net_profit_loss: 0,
-      avg_holding_time: 48,
+      avg_holding_time: 0, // Changed from 48 to 0 for new users
       risk_tolerance: 'medium',
       category_preferences: {},
       category_win_rates: {}

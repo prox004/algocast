@@ -35,7 +35,10 @@ export default function NavBar() {
 
   const links = [
     { href: '/', label: 'Markets' },
-    ...(user ? [{ href: '/wallet', label: 'Wallet' }] : []),
+    ...(user ? [
+      { href: '/dashboard', label: 'Dashboard' },
+      { href: '/wallet', label: 'Wallet' }
+    ] : []),
   ];
 
   function handleLogout() {
