@@ -300,17 +300,20 @@ export class TwitterService {
               console.log(`[TwitterService] Cursor for @${username} advanced to ${new Date(newestTs).toISOString()}`);
             }
 
+            // Use full tweet content for market generation, not truncated version
+            const fullTweetText = (latestTweet as any).text || '';
+            
             trends.push({
-              trend: `@${username}: ${((latestTweet as any).text || '').substring(0, 50)}...`,
+              trend: fullTweetText, // Use full tweet content for better market generation
               volume: engagement,
               url: `https://twitter.com/${username}/status/${(latestTweet as any).id}`,
               timestamp: cycleStart,
               tweet_id: (latestTweet as any).id,
               tweet_author: username,
-              tweet_content: (latestTweet as any).text || ''
+              tweet_content: fullTweetText
             });
             
-            console.log(`✅ [TwitterService] Found real tweet from @${username}: "${((latestTweet as any).text || '').substring(0, 50)}..."`);
+            console.log(`✅ [TwitterService] Found real tweet from @${username}: "${fullTweetText.substring(0, 100)}${fullTweetText.length > 100 ? '...' : ''}"`);
           } else {
             // No new tweets — advance cursor to cycle start so the same
             // empty window is never re-checked next cycle.

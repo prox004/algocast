@@ -36,79 +36,64 @@ export class MarketGeneratorService {
       const content = await chatCompletion([
           {
             role: 'system',
-            content: `You are a strict prediction-market question generator. You convert tweets into sharp, verifiable YES/NO questions like Polymarket or Metaculus. You REFUSE to generate vague or unverifiable questions — output an error instead.
+            content: `You are an expert prediction market question generator that creates high-quality binary questions like Polymarket. You analyze tweets and create clear, verifiable YES/NO questions with specific outcomes and deadlines.
 
-━━━ STEP 1 — EXTRACT FACTS (internal only, don't output) ━━━
-Answer internally:
-1. WHO — full legal name, company name, or ticker? (not "someone", "the person", "they")
-2. WHAT — specific price level, announcement, vote, score, or measurable event?
-3. WHEN — exact date + timezone the outcome is known?
-4. SOURCE — ONE specific public source anyone can check? (website URL pattern, API, official feed)
+━━━ ANALYSIS PROCESS ━━━
+1. READ the full tweet carefully
+2. IDENTIFY the core claim, prediction, or event mentioned
+3. EXTRACT specific entities (companies, people, prices, dates)
+4. CREATE a binary question with measurable outcome
+5. SET appropriate deadline based on the event type
 
-If ANY of these is missing or ambiguous → return { "error": "<reason>" }
+━━━ QUESTION QUALITY STANDARDS ━━━
+✅ GOOD EXAMPLES:
+• "Will Bitcoin close above $100,000 on CoinGecko by March 15, 2026?"
+• "Will Tesla report Q1 2026 revenue above $25 billion?"
+• "Will the Federal Reserve cut interest rates by March 20, 2026?"
+• "Will Apple announce a new iPhone model by June 30, 2026?"
 
-━━━ STEP 2 — QUESTION TEMPLATE ━━━
-Always follow this exact pattern:
-"Will [FULL NAME / TICKER] [VERB: reach / close above / announce / pass / win / release] [SPECIFIC THRESHOLD OR EVENT] by [DATE, TIME, TIMEZONE]?"
+❌ BAD EXAMPLES (REJECT THESE):
+• "Will @username increase by more than 5%?" (vague subject)
+• "Will things get better?" (no measurable outcome)
+• "Will the market react?" (subjective, unverifiable)
+• "Will someone announce something?" (unnamed entities)
 
-Mandatory rules:
-• Subject MUST be a proper noun (person's full name, company name, asset name + ticker)
-• Must contain a NUMERIC THRESHOLD or a SPECIFIC NAMED EVENT (not "improve", "change", "react")
-• Must have an EXACT DEADLINE with timezone (never "soon", "shortly", "within hours")
-• Must be resolvable by checking exactly ONE named source
-• Start with "Will"
-• Simple English — no jargon (no: bullish, bearish, on-chain, momentum, sentiment, ratio, metrics, whale, hodl, protocol)
-• Never use bracket placeholders like [specific action] in the final question
+━━━ MANDATORY REQUIREMENTS ━━━
+1. Subject must be a SPECIFIC named entity (company name, person's full name, asset ticker)
+2. Outcome must be MEASURABLE (price level, percentage, specific event, announcement)
+3. Deadline must be EXACT (date + time + timezone)
+4. Source must be VERIFIABLE (official website, major financial data provider)
+5. Question must start with "Will" and end with "?"
 
-━━━ WHAT TO REJECT — output { "error": "..." } for these ━━━
-• Tweet is a joke, meme, sarcasm, or shitpost with no factual claim
-• Tweet references unnamed people ("someone", "this guy", "the person")
-• Tweet is pure opinion with no measurable prediction ("things are bad", "feeling bullish")
-• No verifiable threshold exists ("will things get better?")
-• Subject is ambiguous slang or Twitter culture references
-• Tweet is about social-media engagement (ratios, likes, followers) — not verifiable via official sources
+━━━ REJECTION CRITERIA ━━━
+Return { "error": "reason" } if the tweet:
+• Is a joke, meme, or sarcasm
+• Contains only opinions without factual claims
+• References unnamed people ("someone", "they", "this person")
+• Has no measurable outcome or specific event
+• Is about social media engagement (likes, followers, ratios)
+• Contains only vague sentiment ("bullish", "bearish", "vibes")
 
-━━━ RESOLUTION SOURCES (pick ONE per question) ━━━
-• Crypto price → "CoinGecko [ASSET] USD price" or "Coinbase [PAIR] spot price"
-• Stock price → "Yahoo Finance [TICKER] closing price" or "Google Finance [TICKER]"
-• Company news → "official press release on [company].com or Reuters/AP wire"
-• Government → "whitehouse.gov, congress.gov, or Reuters/AP"
-• Sports → "ESPN.com final score" or official league site
-• Election/vote → "official results from [election authority]"
-• Regulation → "Federal Register or official regulatory filing"
+━━━ TIMEFRAME GUIDELINES ━━━
+• Breaking news/announcements → 6-24 hours
+• Earnings/scheduled events → Use actual event date
+• Price predictions → 1-7 days depending on context
+• Product launches → Use expected launch date
 
-━━━ EXAMPLES ━━━
-Tweet: "BTC pumping hard rn 🚀🚀"
-✅ "Will Bitcoin (BTC) close above $100,000 on CoinGecko by March 2, 2026, 11:59 PM UTC?"
-
-Tweet: "Tesla Q4 earnings gonna be insane"
-✅ "Will Tesla (TSLA) report Q4 2025 revenue above $30 billion per their official earnings release?"
-
-Tweet: "Hearing the Fed might cut rates this week"
-✅ "Will the US Federal Reserve announce an interest rate cut by March 7, 2026, per federalreserve.gov?"
-
-Tweet: "lmao someone ratioed that dude hard"
-→ { "error": "no identifiable subject or verifiable event" }
-
-Tweet: "President's Day sales are trash this year 😂"
-→ { "error": "subjective opinion with no measurable threshold or named entity" }
-
-Tweet: "vibes are off today ngl"
-→ { "error": "no factual claim, no measurable outcome" }
-
-━━━ OUTPUT — valid JSON only, nothing else ━━━
+━━━ OUTPUT FORMAT ━━━
+Return ONLY valid JSON:
 {
-  "question": "Will [named entity] [specific action/threshold] by [exact date + timezone]?",
-  "data_source": "Exact source name (e.g. 'CoinGecko Bitcoin USD price')",
-  "expiry": "ISO 8601",
-  "ai_probability": 0.0–1.0,
+  "question": "Will [SPECIFIC ENTITY] [MEASURABLE OUTCOME] by [EXACT DATE + TIME + TIMEZONE]?",
+  "data_source": "Specific verification source (e.g., 'CoinGecko Bitcoin USD price', 'Tesla investor relations')",
+  "expiry": "ISO 8601 datetime",
+  "ai_probability": 0.0-1.0,
   "confidence": "high | medium | low",
-  "reasoning": "2-3 sentences. Plain English.",
+  "reasoning": "Brief explanation of the prediction logic",
   "suggested_action": "buy | sell | hold"
 }
 
-OR if unverifiable:
-{ "error": "one-line reason" }`
+OR if rejecting:
+{ "error": "specific reason for rejection" }`
           },
           {
             role: 'user',
@@ -283,35 +268,96 @@ INSTRUCTIONS:
 
   private generateFallbackMarket(request: MarketRequest): GeneratedMarket {
     console.warn('⚠️  AI market generation failed. Using fallback market generator.');
-    console.warn('   Trend:', request.trend);
+    console.warn('   Tweet:', request.trend);
     
-    // Extract key entities from trend text
-    const words = request.trend.split(' ');
-    const topic = words.slice(0, Math.min(5, words.length)).join(' ');
+    // Try to extract meaningful entities from the tweet
+    const tweetText = request.trend.toLowerCase();
+    let question = '';
+    let dataSource = 'twitter_trend_fallback';
     
-    // Generate simple, clear yes/no question
-    const question = `Will ${topic} increase by more than 5% in the next week?`;
+    // Look for crypto mentions
+    const cryptoPatterns = [
+      { pattern: /\b(bitcoin|btc)\b/i, name: 'Bitcoin (BTC)', threshold: '$100,000' },
+      { pattern: /\b(ethereum|eth)\b/i, name: 'Ethereum (ETH)', threshold: '$4,000' },
+      { pattern: /\b(solana|sol)\b/i, name: 'Solana (SOL)', threshold: '$200' },
+      { pattern: /\b(cardano|ada)\b/i, name: 'Cardano (ADA)', threshold: '$1.00' },
+      { pattern: /\b(dogecoin|doge)\b/i, name: 'Dogecoin (DOGE)', threshold: '$0.50' }
+    ];
     
-    // Set expiry to 7 days from now (safe default)
+    // Look for stock mentions
+    const stockPatterns = [
+      { pattern: /\b(tesla|tsla)\b/i, name: 'Tesla (TSLA)', threshold: '$300' },
+      { pattern: /\b(apple|aapl)\b/i, name: 'Apple (AAPL)', threshold: '$200' },
+      { pattern: /\b(microsoft|msft)\b/i, name: 'Microsoft (MSFT)', threshold: '$400' },
+      { pattern: /\b(nvidia|nvda)\b/i, name: 'NVIDIA (NVDA)', threshold: '$800' },
+      { pattern: /\b(amazon|amzn)\b/i, name: 'Amazon (AMZN)', threshold: '$150' }
+    ];
+    
+    // Check for crypto matches
+    for (const crypto of cryptoPatterns) {
+      if (crypto.pattern.test(tweetText)) {
+        question = `Will ${crypto.name} close above ${crypto.threshold} on CoinGecko by [DATE]?`;
+        dataSource = `CoinGecko ${crypto.name.split('(')[0].trim()} USD price`;
+        break;
+      }
+    }
+    
+    // Check for stock matches if no crypto found
+    if (!question) {
+      for (const stock of stockPatterns) {
+        if (stock.pattern.test(tweetText)) {
+          question = `Will ${stock.name} close above ${stock.threshold} on Yahoo Finance by [DATE]?`;
+          dataSource = `Yahoo Finance ${stock.name.split('(')[1].replace(')', '')} closing price`;
+          break;
+        }
+      }
+    }
+    
+    // Generic fallback if no specific entities found
+    if (!question) {
+      // Extract first few meaningful words, avoiding common Twitter noise
+      const words = request.trend
+        .replace(/@\w+:?\s*/g, '') // Remove @mentions
+        .replace(/https?:\/\/\S+/g, '') // Remove URLs
+        .replace(/[^\w\s]/g, ' ') // Remove special chars
+        .split(/\s+/)
+        .filter(word => word.length > 2 && !['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'its', 'may', 'new', 'now', 'old', 'see', 'two', 'who', 'boy', 'did', 'man', 'men', 'put', 'say', 'she', 'too', 'use'].includes(word.toLowerCase()))
+        .slice(0, 3)
+        .join(' ');
+      
+      if (words.length > 0) {
+        question = `Will ${words} result in a significant market movement by [DATE]?`;
+      } else {
+        question = `Will the current market trend continue by [DATE]?`;
+      }
+    }
+    
+    // Set expiry to 24 hours from now
     const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 7);
+    expiryDate.setDate(expiryDate.getDate() + 1);
     const expiry = expiryDate.toISOString();
     
-    // Fallback market with safe defaults
+    // Replace [DATE] placeholder with actual date
+    question = question.replace('[DATE]', expiryDate.toLocaleDateString('en-US', { 
+      month: 'long', 
+      day: 'numeric', 
+      year: 'numeric' 
+    }));
+    
     const fallbackMarket: GeneratedMarket = {
       question,
-      data_source: 'twitter_trend_fallback',
+      data_source: dataSource,
       expiry,
-      ai_probability: 0.50, // Maximum entropy (no bias)
-      confidence: 'low', // Acknowledge lower confidence in fallback
-      reasoning: 'Fallback market generated when AI service unavailable',
-      suggested_action: 'INFORMATIONAL - Market created from trend without AI analysis'
+      ai_probability: 0.50, // Neutral probability for fallback
+      confidence: 'low',
+      reasoning: 'Fallback market generated when AI service unavailable. Limited analysis performed.',
+      suggested_action: 'hold'
     };
     
     console.log('✅ Fallback market generated:');
     console.log('   Question:', question);
+    console.log('   Data Source:', dataSource);
     console.log('   Expiry:', expiry);
-    console.log('   Probability:', fallbackMarket.ai_probability);
     
     return fallbackMarket;
   }
