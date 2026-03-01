@@ -3,35 +3,44 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useUser } from '@auth0/nextjs-auth0/client';
 import { getToken, getMe, logout, type User } from '@/lib/api';
 
 export default function NavBar() {
   const [open, setOpen] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
+  const [legacyUser, setLegacyUser] = useState<User | null>(null);
+  const { user: auth0User, error, isLoading } = useUser();
   const pathname = usePathname();
   const router = useRouter();
 
+  // Determine which user system to use
+  const user = auth0User || legacyUser;
+  const isAuth0 = !!auth0User;
+
   useEffect(() => {
-    if (getToken()) {
-      getMe()
-        .then((data) => {
-          // Explicit validation
-          if (
-            typeof data === 'object' &&
-            data !== null &&
-            typeof data.id === 'string' &&
-            typeof data.email === 'string'
-          ) {
-            setUser(data);
-          } else {
-            setUser(null);
-          }
-        })
-        .catch(() => setUser(null));
-    } else {
-      setUser(null);
+    // Only check legacy auth if Auth0 is not active
+    if (!auth0User && !isLoading) {
+      if (getToken()) {
+        getMe()
+          .then((data) => {
+            // Explicit validation
+            if (
+              typeof data === 'object' &&
+              data !== null &&
+              typeof data.id === 'string' &&
+              typeof data.email === 'string'
+            ) {
+              setLegacyUser(data);
+            } else {
+              setLegacyUser(null);
+            }
+          })
+          .catch(() => setLegacyUser(null));
+      } else {
+        setLegacyUser(null);
+      }
     }
-  }, [pathname]); // re-check on route change (e.g. after login)
+  }, [pathname, auth0User, isLoading]); // re-check on route change
 
   const links = [
     { href: '/', label: 'Markets' },
@@ -42,9 +51,28 @@ export default function NavBar() {
   ];
 
   function handleLogout() {
-    setUser(null);
-    logout();
+    if (isAuth0) {
+      // Auth0 logout
+      window.location.href = '/api/auth/logout';
+    } else {
+      // Legacy logout
+      setLegacyUser(null);
+      logout();
+    }
   }
+
+  function handleLogin() {
+    if (process.env.NEXT_PUBLIC_AUTH0_ENABLED === 'true') {
+      // Auth0 login
+      window.location.href = '/api/auth/login';
+    } else {
+      // Legacy login
+      router.push('/login');
+    }
+  }
+
+  const userEmail = auth0User?.email || legacyUser?.email || '';
+  const userName = auth0User?.name || legacyUser?.email?.split('@')[0] || '';
 
   return (
     <nav className="border-b border-gray-800 bg-gray-950/90 backdrop-blur sticky top-0 z-50">
@@ -66,17 +94,31 @@ export default function NavBar() {
           ))}
           {user ? (
             <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-500 max-w-[130px] truncate" title={user.email}>
-                {user.email}
-              </span>
+              <div className="flex items-center gap-2">
+                {auth0User?.picture && (
+                  <img 
+                    src={auth0User.picture} 
+                    alt={userName}
+                    className="w-6 h-6 rounded-full"
+                  />
+                )}
+                <span className="text-xs text-gray-500 max-w-[130px] truncate" title={userEmail}>
+                  {userName || userEmail}
+                </span>
+                {isAuth0 && (
+                  <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">
+                    Auth0
+                  </span>
+                )}
+              </div>
               <button onClick={handleLogout} className="btn-secondary text-sm py-1.5 px-3">
                 Logout
               </button>
             </div>
           ) : (
-            <Link href="/login" className="btn-primary text-sm py-1.5 px-3">
+            <button onClick={handleLogin} className="btn-primary text-sm py-1.5 px-3">
               Login
-            </Link>
+            </button>
           )}
         </div>
 
@@ -87,9 +129,9 @@ export default function NavBar() {
               Logout
             </button>
           ) : (
-            <Link href="/login" className="btn-primary text-sm py-1.5 px-3">
+            <button onClick={handleLogin} className="btn-primary text-sm py-1.5 px-3">
               Login
-            </Link>
+            </button>
           )}
           <button
             onClick={() => setOpen((o) => !o)}
@@ -123,7 +165,21 @@ export default function NavBar() {
             </Link>
           ))}
           {user && (
-            <p className="text-xs text-gray-600 truncate">{user.email}</p>
+            <div className="flex items-center gap-2">
+              {auth0User?.picture && (
+                <img 
+                  src={auth0User.picture} 
+                  alt={userName}
+                  className="w-5 h-5 rounded-full"
+                />
+              )}
+              <p className="text-xs text-gray-600 truncate">{userName || userEmail}</p>
+              {isAuth0 && (
+                <span className="text-xs bg-green-500/20 text-green-400 px-1 py-0.5 rounded">
+                  Auth0
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}

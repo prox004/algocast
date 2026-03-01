@@ -36,6 +36,8 @@ sqlite.exec(`
     balance INTEGER DEFAULT 0,
     oauth_provider TEXT,
     oauth_id TEXT,
+    name TEXT,
+    picture TEXT,
     created_at INTEGER NOT NULL,
     UNIQUE(oauth_provider, oauth_id)
   );
@@ -96,6 +98,17 @@ sqlite.exec(`
 `);
 
 // ── Database Migrations ─────────────────────────────────────────────────────
+
+// Add Auth0 fields to users table
+try {
+  sqlite.exec(`
+    ALTER TABLE users ADD COLUMN name TEXT;
+    ALTER TABLE users ADD COLUMN picture TEXT;
+  `);
+  console.log('[SQLite] Added Auth0 fields to users table');
+} catch (err) {
+  // Columns already exist, ignore error
+}
 
 // Add txid to trades table for on-chain tracking
 try {
@@ -372,8 +385,8 @@ try {
 const statements = {
   // Users
   insertUser: sqlite.prepare(`
-    INSERT INTO users (id, email, hashed_password, custodial_address, encrypted_private_key, balance, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (id, email, hashed_password, custodial_address, encrypted_private_key, balance, oauth_provider, oauth_id, name, picture, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getUserById: sqlite.prepare('SELECT * FROM users WHERE id = ?'),
   getUserByEmail: sqlite.prepare('SELECT * FROM users WHERE email = ?'),
@@ -522,6 +535,10 @@ const db = {
         user.custodial_address,
         user.encrypted_private_key,
         user.balance || 0,
+        user.oauth_provider || null,
+        user.oauth_id || null,
+        user.name || null,
+        user.picture || null,
         Date.now()
       );
       return user;
@@ -558,6 +575,11 @@ const db = {
 
   getUserByOAuth(provider, oauthId) {
     return statements.getUserByOAuth.get(provider, oauthId) || null;
+  },
+
+  // Auth0 specific helper
+  getUserByAuth0Id(auth0Id) {
+    return statements.getUserByOAuth.get('auth0', auth0Id) || null;
   },
 
   setExternalWallet(userId, address, verifiedAt) {

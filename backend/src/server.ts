@@ -5,11 +5,14 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
+import { auth } from 'express-openid-connect';
+import auth0Config, { isAuth0Configured } from './config/auth0';
 import aiRoutes from './routes/ai';
 import dbMarketsRoutes from './routes/markets'; // New TypeScript DB routes
 import adminAuthRoutes from './routes/adminAuth';
 import adminRoutes from './routes/admin';
 import disputeRoutes from './routes/dispute';
+import auth0Routes from './routes/auth0';
 import { errorHandler, notFoundHandler } from './utils/errorHandler';
 import { getAutoMarketGeneratorService } from './services/autoMarketGenerator.service';
 import { startUmaScheduler } from './services/uma.service';
@@ -52,13 +55,21 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Session middleware (required for passport)
+// Session middleware (required for passport and Auth0)
 app.use(session({
   secret: process.env.SESSION_SECRET || process.env.JWT_SECRET || 'fallback-secret',
   resave: false,
   saveUninitialized: false,
   cookie: { secure: process.env.NODE_ENV === 'production' }
 }));
+
+// Initialize Auth0 (if configured)
+if (isAuth0Configured()) {
+  app.use(auth(auth0Config));
+  console.log('✅ Auth0 initialized');
+} else {
+  console.warn('⚠️  Auth0 not configured - using fallback authentication');
+}
 
 // Initialize Passport (if configured)
 try {
@@ -96,6 +107,7 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/auth', authRoutes);
+app.use('/auth0', auth0Routes);
 app.use('/wallet', walletRoutes);
 app.use('/markets/db', dbMarketsRoutes); // New database query routes
 app.use('/markets', legacyMarketsRoutes); // Legacy trading routes

@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@auth0/nextjs-auth0": "^4.15.0",
     "@perawallet/connect": "^1.5.1",
     "algosdk": "^3.5.2",
     "next": "^16.1.6",
