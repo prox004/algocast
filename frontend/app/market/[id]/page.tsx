@@ -5,12 +5,14 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   getMarket,
   claimWinnings,
+  getUserTradesForMarket,
   getToken,
   formatAlgo,
   formatProb,
   isExpired,
   getMarketCurrentPrice,
   type Market,
+  type Trade,
   type CurrentPrice,
 } from '@/lib/api';
 import BuyPanel from '@/components/BuyPanel';
@@ -25,6 +27,7 @@ export default function MarketDetailPage() {
   const router = useRouter();
   const [market, setMarket] = useState<Market | null>(null);
   const [currentPrice, setCurrentPrice] = useState<CurrentPrice | null>(null);
+  const [userTrades, setUserTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [claimMsg, setClaimMsg] = useState('');
@@ -53,6 +56,12 @@ export default function MarketDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Fetch user's trades for this market (needed for claim eligibility + dispute gating)
+  useEffect(() => {
+    if (!id || !isLoggedIn) return;
+    getUserTradesForMarket(id).then(setUserTrades).catch(() => {});
+  }, [id, isLoggedIn]);
+
   async function handleClaim() {
     if (!market) return;
     try {
@@ -76,6 +85,23 @@ export default function MarketDetailPage() {
   const expired = isExpired(market);
   const marketProb = market.market_probability ?? 0;
   const canTrade = isLoggedIn && !market.resolved && !expired;
+
+  // Normalise outcome: integer column takes priority; fall back to TEXT result column
+  const effectiveOutcome: 0 | 1 | null =
+    market.outcome !== null ? market.outcome
+    : market.result === 'yes' ? 1
+    : market.result === 'no'  ? 0
+    : null;
+
+  // UMA is blocking claims if a dispute/vote is still in progress
+  const umaInProgress = market.uma_status === 'PROPOSED' || market.uma_status === 'UMA_VOTING';
+
+  // Only show claim if the user actually bet on the winning side
+  const hasWinningPosition =
+    effectiveOutcome !== null &&
+    userTrades.some((t) => t.side === (effectiveOutcome === 1 ? 'YES' : 'NO'));
+
+  const canClaim = isLoggedIn && market.resolved && !umaInProgress && hasWinningPosition;
 
   return (
     // Extra bottom padding so sticky bar doesn't cover content
@@ -259,13 +285,42 @@ export default function MarketDetailPage() {
       )}
 
       {/* Claim */}
-      {isLoggedIn && market.resolved && (
+      {canClaim && (
         <div className="card">
-          <h2 className="font-semibold mb-3">Claim Winnings</h2>
+          <h2 className="font-semibold mb-2">Claim Winnings</h2>
+          <p className="text-xs text-gray-400 mb-3">
+            You bet{' '}
+            <span className={effectiveOutcome === 1 ? 'font-bold text-emerald-400' : 'font-bold text-red-400'}>
+              {effectiveOutcome === 1 ? 'YES' : 'NO'}
+            </span>{' '}
+            and this market resolved{' '}
+            <span className={effectiveOutcome === 1 ? 'font-bold text-emerald-400' : 'font-bold text-red-400'}>
+              {effectiveOutcome === 1 ? 'YES' : 'NO'}
+            </span>. Claim your payout below.
+          </p>
           <button onClick={handleClaim} className="btn-primary w-full">
-            Claim
+            Claim Winnings
           </button>
           {claimMsg && <p className="text-sm mt-2 text-gray-300">{claimMsg}</p>}
+        </div>
+      )}
+
+      {/* Losing position notice */}
+      {isLoggedIn && market.resolved && !umaInProgress && !hasWinningPosition && effectiveOutcome !== null && userTrades.length > 0 && (
+        <div className="card">
+          <p className="text-sm text-gray-400 text-center">
+            Market resolved{' '}
+            <span className={effectiveOutcome === 1 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+              {effectiveOutcome === 1 ? 'YES' : 'NO'}
+            </span>. Your position did not win.
+          </p>
+        </div>
+      )}
+
+      {/* UMA dispute in progress — claim blocked */}
+      {isLoggedIn && umaInProgress && (
+        <div className="card text-center">
+          <p className="text-sm text-blue-300">⚖️ UMA dispute in progress — claim will be available once the verdict is locked.</p>
         </div>
       )}
 

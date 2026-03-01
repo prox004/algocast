@@ -29,6 +29,8 @@ const {
   isContractReady,
   fundUserAccount,
   getEscrowAddress,
+  signAsaOptIn,
+  readMarketState,
 } = require('../algorand/transactionBuilder');
 const { getAlgodClient } = require('../algorand/client');
 const { normalizeAddress } = require('../wallet/custodialWallet');
@@ -63,7 +65,9 @@ function marketProbability(market) {
 
 /** Derive whether market is resolved from status/outcome */
 function isMarketResolved(market) {
-  return market.status === 'RESOLVED' || market.status === 'CLOSED' || market.outcome !== null;
+  return market.status === 'RESOLVED' || market.status === 'CLOSED'
+      || market.outcome !== null
+      || (market.result !== null && market.result !== undefined);
 }
 
 /** Enrich a market object with computed probability + derived resolved flag */
@@ -220,20 +224,67 @@ function buyTokens(side) {
       // ── On-chain mode ────────────────────────────────────────────────────
       if (market.app_id && market.app_address && isContractReady()) {
         // Smart-contract path: atomic [PaymentTxn + ABI app-call]
-        const asaId = side === 'YES' ? market.yes_asa_id : market.no_asa_id;
+        let asaId = side === 'YES' ? market.yes_asa_id : market.no_asa_id;
+
+        // ── Heal null ASA IDs: read back from contract global state ───────
+        if (!asaId || asaId <= 0) {
+          console.warn(`[buy-${side.toLowerCase()}] yes_asa_id/no_asa_id null in DB for market ${market.id}. Reading from chain...`);
+          try {
+            const onChainState = await readMarketState(market.app_id);
+            const healedYes = Number(onChainState['yes_asa_id'] || 0);
+            const healedNo  = Number(onChainState['no_asa_id']  || 0);
+            if (healedYes > 0 && healedNo > 0) {
+              db.updateMarket(market.id, { yes_asa_id: healedYes, no_asa_id: healedNo });
+              asaId = side === 'YES' ? healedYes : healedNo;
+              console.log(`[buy-${side.toLowerCase()}] Healed ASA IDs from chain — YES:${healedYes} NO:${healedNo}`);
+            } else {
+              throw new Error(`Contract state missing yes_asa_id/no_asa_id for app ${market.app_id}`);
+            }
+          } catch (healErr) {
+            console.error(`[buy-${side.toLowerCase()} heal]`, healErr.message);
+            return res.status(502).json({ error: 'Cannot determine ASA IDs for this market. Contact support.' });
+          }
+        }
+
+        const fromAddress = normalizeAddress(user.custodial_address);
+
+        // ── Pre-flight: auto opt-in to the ASA if not yet done ────────────────
+        // Algorand requires the token receiver to opt-in before any transfer.
+        const algodClient = require('../algorand/client').getAlgodClient();
+        try {
+          await algodClient.accountAssetInformation(fromAddress, asaId).do();
+          // Already opted in — no action needed
+        } catch (optCheckErr) {
+          // 404 = not opted in
+          if (optCheckErr.status === 404 || /not opted/i.test(optCheckErr.message)) {
+            console.log(`[buy-${side.toLowerCase()}] User ${fromAddress} not opted in to ASA ${asaId}. Submitting opt-in...`);
+            try {
+              const optInSigned = await signAsaOptIn({ fromAddress, encryptedKey: user.encrypted_private_key, asaId });
+              await broadcast(optInSigned);
+              console.log(`[buy-${side.toLowerCase()}] Opt-in confirmed for ASA ${asaId}`);
+            } catch (optInErr) {
+              console.error(`[buy-${side.toLowerCase()} opt-in]`, optInErr.message);
+              return res.status(502).json({ error: `ASA opt-in failed: ${optInErr.message}` });
+            }
+          }
+          // Other errors (network issues) — proceed and let the buy fail naturally
+        }
+
         try {
           const signed = await signBuyGroup(side, {
-            fromAddress:      normalizeAddress(user.custodial_address),
+            fromAddress,
             encryptedKey:     user.encrypted_private_key,
             appId:            market.app_id,
             appAddress:       market.app_address,
             asaId,
+            yesAsaId:         market.yes_asa_id,
+            noAsaId:          market.no_asa_id,
             amountMicroAlgos: microAlgos,
           });
           txid = await broadcast(signed);
         } catch (txnErr) {
           console.error(`[buy-${side.toLowerCase()} txn]`, txnErr.message);
-          return res.status(502).json({ error: 'On-chain transaction failed' });
+          return res.status(502).json({ error: `On-chain transaction failed: ${txnErr.message}` });
         }
       } else {
         // ── Escrow mode: send ALGO from user → platform escrow on-chain ──
@@ -252,7 +303,7 @@ function buyTokens(side) {
           console.log(`[buy-${side.toLowerCase()}] On-chain escrow tx: ${txid}`);
         } catch (txnErr) {
           console.error(`[buy-${side.toLowerCase()} escrow-txn]`, txnErr.message);
-          return res.status(502).json({ error: 'On-chain transaction failed' });
+          return res.status(502).json({ error: `On-chain transaction failed: ${txnErr.message}` });
         }
       }
 
@@ -340,13 +391,24 @@ router.post('/claim', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Already claimed for this market' });
     }
 
-    const winningSide = market.outcome === 1 ? 'YES' : 'NO';
+    // Normalise outcome: prefer integer column; fall back to TEXT result column (database.service path)
+    const outcomeInt =
+      (market.outcome !== null && market.outcome !== undefined) ? market.outcome
+      : market.result === 'yes' ? 1
+      : market.result === 'no'  ? 0
+      : null;
+
+    if (outcomeInt === null) {
+      return res.status(400).json({ error: 'Market outcome not yet determined' });
+    }
+
+    const winningSide = outcomeInt === 1 ? 'YES' : 'NO';
     const userTrades = db.getUserTradesForMarket(req.user.id, market_id);
     const winningTrades = userTrades.filter((t) => t.side === winningSide);
     const totalWinningTokens = winningTrades.reduce((sum, t) => sum + t.tokens, 0);
 
     if (totalWinningTokens === 0) {
-      return res.status(400).json({ error: 'No winning tokens to claim' });
+      return res.status(400).json({ error: `No winning tokens to claim. You bet on ${winningTrades.length === 0 ? (winningSide === 'YES' ? 'NO' : 'YES') : winningSide} but the winning side is ${winningSide}.` });
     }
 
     const payout = totalWinningTokens; // 1:1 model
@@ -366,7 +428,7 @@ router.post('/claim', requireAuth, async (req, res) => {
         txid = await broadcast(signed);
       } catch (txnErr) {
         console.error('[claim contract-txn]', txnErr.message);
-        return res.status(502).json({ error: 'On-chain claim failed' });
+        return res.status(502).json({ error: `On-chain claim failed: ${txnErr.message}` });
       }
     } else {
       // ── Escrow mode: send ALGO from platform escrow → user on-chain ──────
@@ -378,7 +440,7 @@ router.post('/claim', requireAuth, async (req, res) => {
         console.log(`[claim] On-chain payout ${payout / 1e6} ALGO to ${normalizeAddress(user.custodial_address)}. Tx: ${txid}`);
       } catch (txnErr) {
         console.error('[claim escrow-txn]', txnErr.message);
-        return res.status(502).json({ error: 'On-chain payout failed' });
+        return res.status(502).json({ error: `On-chain payout failed: ${txnErr.message}` });
       }
     }
 
@@ -484,7 +546,7 @@ router.post('/place-order', requireAuth, async (req, res) => {
       console.log(`[place-order] On-chain escrow tx: ${txid}`);
     } catch (txnErr) {
       console.error('[place-order escrow-txn]', txnErr.message);
-      return res.status(502).json({ error: 'On-chain escrow transaction failed' });
+      return res.status(502).json({ error: `On-chain escrow transaction failed: ${txnErr.message}` });
     }
 
     // Sync balance

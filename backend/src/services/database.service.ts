@@ -266,6 +266,9 @@ export class DatabaseService {
     if (result) {
       updates.push('result = ?');
       params.push(result);
+      // Also keep the integer outcome column in sync so markets.js claim logic works correctly
+      updates.push('outcome = ?');
+      params.push(result === 'yes' ? 1 : 0);
     }
 
     params.push(id);
