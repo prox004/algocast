@@ -343,6 +343,8 @@ router.get('/sentiment/:market_id', async (req, res) => {
       });
     }
 
+    console.log(`[Sentiment API] Analyzing market ${market_id}: "${market.question}"`);
+
     const sentimentService = getSentimentService();
     const result = await sentimentService.analyze(
       market_id,
@@ -350,13 +352,50 @@ router.get('/sentiment/:market_id', async (req, res) => {
       market.market_probability ?? 0.5,
     );
 
+    console.log(`[Sentiment API] Analysis complete for ${market_id}:`, {
+      success: result.success,
+      sentiment: result.sentiment.label,
+      articles: result.sources.news_count,
+      confidence: result.sentiment.confidence
+    });
+
     // Return the sentiment result directly - it already has the right structure
     return res.json(result);
   } catch (error) {
-    console.error('[Sentiment] Endpoint error:', error);
+    console.error('[Sentiment API] Endpoint error:', error);
     return res.status(500).json({
       success: false,
       error: 'Failed to analyze sentiment',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// GET /test-sentiment — Test sentiment analysis with a sample question
+router.get('/test-sentiment', async (req, res) => {
+  try {
+    const testQuestion = req.query.q as string || "Will Bitcoin close above $100,000 by March 2026?";
+    const testMarketId = "test-" + Date.now();
+    
+    console.log(`[Test Sentiment] Testing with question: "${testQuestion}"`);
+    
+    const sentimentService = getSentimentService();
+    const result = await sentimentService.analyze(
+      testMarketId,
+      testQuestion,
+      0.65 // Mock crowd probability
+    );
+    
+    return res.json({
+      test: true,
+      question: testQuestion,
+      result
+    });
+  } catch (error) {
+    console.error('[Test Sentiment] Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Test sentiment analysis failed',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
